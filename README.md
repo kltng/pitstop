@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/icon.png" width="128" alt="PitStop icon">
+</p>
+
 # PitStop
 
 macOS menu bar app that shows your Claude Code account's **usage limits** and

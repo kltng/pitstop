@@ -201,3 +201,10 @@ guard iconutil.terminationStatus == 0 else {
     fatalError("iconutil failed with status \(iconutil.terminationStatus)")
 }
 print("Wrote \(icns.path)")
+
+// The README header image (committed, unlike the iconset).
+let docsIcon = projectRoot.appendingPathComponent("docs/icon.png")
+try FileManager.default.createDirectory(at: docsIcon.deletingLastPathComponent(),
+                                        withIntermediateDirectories: true)
+try render(px: 256).write(to: docsIcon)
+print("Wrote \(docsIcon.path)")

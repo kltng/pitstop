@@ -314,6 +314,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let email = activeEmail, let report,
               let utilization = IndicatorMetric.current.utilization(of: report) else {
             button.contentTintColor = nil
+            button.appearsDisabled = false
             button.title = style == .iconOnly ? "" : " –"
             if let email = activeEmail, let report {
                 button.toolTip = statusTip(email: email, report: report)
@@ -325,17 +326,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         let pct = Int(utilization.rounded())
         let isStale = fetchError[email] != nil
-        let color: NSColor = isStale ? .secondaryLabelColor
-            : (pct >= 90 ? .systemRed : (pct >= 75 ? .systemOrange : .labelColor))
-        // In icon-only mode the tint is the only at-a-glance signal; leave
-        // the icon untinted while healthy so it matches its neighbors.
-        button.contentTintColor = color == .labelColor ? nil : color
+        // Explicit "neutral" colors (label/secondaryLabel) bypass the menu
+        // bar's wallpaper-adaptive rendering and come out black on a dark
+        // menu bar in light mode — so neutral content stays uncolored
+        // (template icon + colorless title) and stale state dims via
+        // appearsDisabled. Only the warning tints set a real color; orange
+        // and red read fine on any wallpaper.
+        let warning: NSColor? = pct >= 90 ? .systemRed : (pct >= 75 ? .systemOrange : nil)
+        button.appearsDisabled = isStale
+        button.contentTintColor = isStale ? nil : warning
+        var attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium),
+        ]
+        if let warning, !isStale { attributes[.foregroundColor] = warning }
         button.attributedTitle = NSAttributedString(
-            string: style == .iconOnly ? "" : " \(pct)%",
-            attributes: [
-                .foregroundColor: color,
-                .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium),
-            ])
+            string: style == .iconOnly ? "" : " \(pct)%", attributes: attributes)
         button.toolTip = statusTip(email: email, report: report)
     }
 

@@ -35,8 +35,9 @@ the one you'd switch to). Iterate on the row design with
 - **Usage** comes from Anthropic's OAuth usage endpoint
   (`api.anthropic.com/api/oauth/usage`), called with the same OAuth token
   Claude Code uses. Refreshes every 2 min (debounced on menu open), with
-  exponential backoff honoring `Retry-After` when Anthropic rate-limits;
-  the last good numbers stay visible (dimmed, "as of …") during outages.
+  exponential backoff honoring `Retry-After` when Anthropic rate-limits,
+  retrying as soon as the backoff window expires; the last good numbers
+  stay visible (dimmed, "as of …") during outages.
 - **Menu bar number** is the active account's binding constraint —
   `max(5-hour, weekly)` utilization. Orange ≥ 75 %, red ≥ 90 %.
   The **Menu Bar Display** submenu customizes it: icon & percent /

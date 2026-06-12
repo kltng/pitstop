@@ -54,6 +54,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
     private var timer: Timer?
+    /// One-shot retry scheduled for the earliest backoff expiry, so a
+    /// rate-limited account doesn't wait out the rest of a 2-min tick.
+    private var backoffTimer: Timer?
 
     private let store = ProfileStore()
     private var activeEmail: String?
@@ -108,7 +111,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         // Menu shows cached data instantly; only re-fetch if it's gone stale.
-        if let last = lastRefresh, Date().timeIntervalSince(last) < menuRefreshDebounce {
+        // An expired backoff bypasses the debounce — a retry is overdue
+        // (e.g. right after wake, before any timer has fired).
+        let retryDue = nextFetchAllowed.values.contains { $0 <= Date() }
+        if !retryDue, let last = lastRefresh,
+           Date().timeIntervalSince(last) < menuRefreshDebounce {
             return
         }
         refreshAll()
@@ -188,7 +195,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 buildMenu()
             }
             checkThresholds()
+            scheduleBackoffRetry()
         }
+    }
+
+    /// Schedule a one-shot refresh for when the earliest active backoff
+    /// expires, instead of letting the account idle until the next 2-min
+    /// tick. Floored at 10 s so a tiny Retry-After can't turn into a hot
+    /// retry loop.
+    private func scheduleBackoffRetry() {
+        backoffTimer?.invalidate()
+        backoffTimer = nil
+        guard let earliest = nextFetchAllowed.values.filter({ $0 > Date() }).min() else { return }
+        let fireIn = max(earliest.timeIntervalSinceNow + 1, 10)
+        guard fireIn < refreshInterval else { return }  // regular tick covers it
+        let t = Timer(timeInterval: fireIn, repeats: false) { [weak self] _ in
+            Task { @MainActor in self?.refreshAll() }
+        }
+        RunLoop.main.add(t, forMode: .common)
+        backoffTimer = t
     }
 
     /// Update the rows of the open menu without rebuilding it, so hover

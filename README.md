@@ -13,8 +13,50 @@ The coral dot marks the active account; hovering an inactive row flips its
 plan chip into a coral **Switch** pill — click to switch. Rows are sorted
 active-first, then by headroom (the emptiest account next — the one you'd
 switch to). The menu bar shows the active account's binding limit,
-color-coded. Iterate on the row design with
-`.build/debug/PitStop --preview` → `/tmp/pitstop-preview.png`.
+color-coded.
+
+## Quickstart
+
+Using an AI agent? Copy this prompt into Claude Code (or any agent that can
+run shell commands) on the target Mac:
+
+```text
+Install and set up PitStop (https://github.com/Livin21/pitstop), a macOS
+menu bar app that shows Claude Code usage limits and switches between
+Claude accounts, on this Mac.
+
+1. Verify requirements: macOS 26+, Xcode Command Line Tools
+   (xcode-select --install), and Claude Code installed and logged in.
+   Stop and tell me if any are missing.
+2. Clone the repo and run ./scripts/make-app.sh — it builds and installs
+   /Applications/PitStop.app. Then `open /Applications/PitStop.app`.
+3. You cannot interact with macOS security dialogs — walk me through
+   them instead: when PitStop first reads the Claude Code credentials,
+   macOS may ask for my login keychain password. I'll enter it and click
+   "Always Allow" (plain "Allow" makes the prompt come back). The grant
+   is one-time; it survives rebuilds.
+4. Verify: a checkered-flag icon appears in the menu bar showing my
+   usage percentage, and `.build/release/PitStop --check` prints my
+   account with live usage numbers.
+5. Tell me how to add a second account: run /login in Claude Code and
+   sign in with the other account — PitStop saves it within 2 minutes
+   (or via "Save Current Account" in the menu). I'll also click "Allow"
+   on the notification prompt the first time it warns about usage.
+```
+
+Or set it up manually:
+
+1. Requirements: **macOS 26+**, Xcode Command Line Tools, and Claude Code
+   logged in at least once.
+2. Build and install:
+   ```sh
+   git clone https://github.com/Livin21/pitstop && cd pitstop
+   ./scripts/make-app.sh
+   open /Applications/PitStop.app
+   ```
+3. When macOS asks for your login keychain password, enter it and click
+   **Always Allow** — one-time; see [Caveats](#caveats).
+4. Add more accounts per [Adding a second account](#adding-a-second-account).
 
 ## How it works
 
@@ -70,16 +112,16 @@ Claude Code holds its access token in memory. After a switch:
   expires (tokens are short-lived), then re-read the keychain and continue on
   the new account. No restarts needed.
 
-## Build / install
+## Development
 
-```sh
-./scripts/make-app.sh        # builds release + installs /Applications/PitStop.app
-```
+`./scripts/make-app.sh` builds release and installs
+`/Applications/PitStop.app`. Useful flags on the bare binary:
 
-Dev loop: `swift build && .build/debug/PitStop --check` prints accounts and
-live usage to stdout without starting the GUI. For README captures,
-`/Applications/PitStop.app/Contents/MacOS/PitStop --screenshot` runs the
-app with sample addresses rendered in place of real emails.
+- `--check` — print accounts and live usage to stdout, no GUI.
+- `--preview` — render sample account rows to `/tmp/pitstop-preview.png`
+  for iterating on the row design.
+- `--screenshot` — run the app with sample addresses in place of real
+  emails, for README captures.
 
 The app icon (usage gauge with a coral needle nearing the red zone, over a
 checkered pit-lane strip) is drawn programmatically — regenerate

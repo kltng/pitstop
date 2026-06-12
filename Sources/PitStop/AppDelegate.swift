@@ -155,8 +155,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             for profile in store.profiles {
                 let email = profile.email
-                if let notBefore = nextFetchAllowed[email], Date() < notBefore {
-                    continue // still backing off; keep showing stale data
+                if let notBefore = nextFetchAllowed[email] {
+                    if Date() < notBefore {
+                        continue // still backing off; keep showing stale data
+                    }
+                    // Gate passed — clear it now so entries are always
+                    // future-dated or absent (menuNeedsUpdate's retryDue
+                    // check relies on that); the attempt below sets a new
+                    // one if needed.
+                    nextFetchAllowed[email] = nil
                 }
                 do {
                     let creds = try await freshCredentials(for: email,

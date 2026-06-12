@@ -244,9 +244,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             menu.addItem(login)
         }
 
+        // Routed through quitApp rather than terminate: directly — macOS 26
+        // auto-assigns an icon to well-known selectors, which adds an image
+        // column to this group and orphans the Launch at Login checkmark.
         let quit = NSMenuItem(title: "Quit PitStop",
-                              action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        quit.target = NSApp
+                              action: #selector(quitApp(_:)), keyEquivalent: "q")
+        quit.target = self
         menu.addItem(quit)
     }
 
@@ -352,6 +355,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         } catch {
             showError("Couldn't remove account", error)
         }
+    }
+
+    @objc private func quitApp(_ sender: Any?) {
+        NSApp.terminate(sender)
     }
 
     @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {

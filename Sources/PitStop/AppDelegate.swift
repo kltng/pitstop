@@ -166,8 +166,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     // 2 min → 4 min → … capped at 15 min.
                     let delay = retryAfter
                         ?? min(120 * pow(2, Double(fails - 1)), 900)
+                    // Retry timing is rendered from nextFetchAllowed at
+                    // display time, so it doesn't go stale in the menu.
                     nextFetchAllowed[email] = Date().addingTimeInterval(delay)
-                    fetchError[email] = "Rate limited — retrying \(Format.relative(delay))"
+                    fetchError[email] = "Rate limited"
                 } catch UsageAPI.APIError.unauthorized {
                     failureCount[email] = (failureCount[email] ?? 0) + 1
                     fetchError[email] = UsageAPI.APIError.unauthorized.localizedDescription
@@ -435,9 +437,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         var status: String?
         if let err = fetchError[email] {
+            var text = err
+            if let until = nextFetchAllowed[email] {
+                let remaining = until.timeIntervalSinceNow
+                text += remaining > 1
+                    ? " — retrying \(Format.relative(remaining))"
+                    : " — retrying on next refresh"
+            }
             status = report.map {
-                "⚠︎ \(err) · showing \(Format.updated.string(from: $0.fetchedAt)) data"
-            } ?? "⚠︎ \(err)"
+                "⚠︎ \(text) · showing \(Format.updated.string(from: $0.fetchedAt)) data"
+            } ?? "⚠︎ \(text)"
         } else if report == nil {
             status = "Loading…"
         }

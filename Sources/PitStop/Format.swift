@@ -34,7 +34,8 @@ enum Format {
         let m = (total % 3600) / 60
         if d > 0 { return "in \(d)d \(h)h" }
         if h > 0 { return "in \(h)h \(m)m" }
-        return "in \(m)m"
+        if m > 0 { return "in \(m)m" }
+        return "in \(total)s"
     }
 
     static let updated: DateFormatter = {

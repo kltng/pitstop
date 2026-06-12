@@ -5,29 +5,15 @@ lets you **switch between Claude accounts** with one click — so when one
 account hits its 5-hour or weekly rate limit, you flip to another and your
 work keeps going.
 
-```
-┌────────────────────────────────────────────────────┐
-│  ⚑ 23%                                             │  ← menu bar: binding limit, color-coded
-├────────────────────────────────────────────────────┤
-│  Claude Code Usage                                 │
-│  ● asha@work.com                  [Acme AI·Team·5x]│  ← active: coral dot
-│     5h ██░░░░░░░░ 20%   9:49 PM · 3h 34m           │  ← colored bars:
-│     7d ██░░░░░░░░ 23%   Thu 10:29 AM · 5d 16h      │    green/orange/red
-│  personal@gmail.com                       [Switch] │  ← hover: coral pill,
-│     5h █████████░ 96%   7:40 PM · 1h 24m           │    click to switch
-│     7d ████░░░░░░ 36%   Sun 5:30 AM · 1d 11h       │
-│  ────────────────────────────────────────────────  │
-│  Save Current Account                        ⌘S    │
-│  Remove Account                              ▸     │
-│  Refresh Now                                 ⌘R    │
-│      Updated 6:15 PM · refreshes every 2 min       │
-│  Launch at Login                                   │
-│  Quit PitStop                                ⌘Q    │
-└────────────────────────────────────────────────────┘
-```
+<p align="center">
+  <img src="docs/menu.png" width="465" alt="PitStop menu: two accounts with color-coded usage bars">
+</p>
 
-Rows are sorted active-first, then by headroom (the emptiest account next —
-the one you'd switch to). Iterate on the row design with
+The coral dot marks the active account; hovering an inactive row flips its
+plan chip into a coral **Switch** pill — click to switch. Rows are sorted
+active-first, then by headroom (the emptiest account next — the one you'd
+switch to). The menu bar shows the active account's binding limit,
+color-coded. Iterate on the row design with
 `.build/debug/PitStop --preview` → `/tmp/pitstop-preview.png`.
 
 ## How it works

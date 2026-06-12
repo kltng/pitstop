@@ -1,6 +1,50 @@
 import AppKit
 import ServiceManagement
 
+/// What the menu bar item shows.
+enum IndicatorStyle: String, CaseIterable {
+    case iconAndPercent, iconOnly, percentOnly
+
+    static var current: IndicatorStyle {
+        UserDefaults.standard.string(forKey: "indicatorStyle")
+            .flatMap(IndicatorStyle.init) ?? .iconAndPercent
+    }
+
+    var label: String {
+        switch self {
+        case .iconAndPercent: return "Icon & Percent"
+        case .iconOnly: return "Icon Only"
+        case .percentOnly: return "Percent Only"
+        }
+    }
+}
+
+/// Which limit drives the menu bar number and color.
+enum IndicatorMetric: String, CaseIterable {
+    case binding, fiveHour, weekly
+
+    static var current: IndicatorMetric {
+        UserDefaults.standard.string(forKey: "indicatorMetric")
+            .flatMap(IndicatorMetric.init) ?? .binding
+    }
+
+    var label: String {
+        switch self {
+        case .binding: return "Highest Limit"
+        case .fiveHour: return "5-Hour Limit"
+        case .weekly: return "Weekly Limit"
+        }
+    }
+
+    func utilization(of report: UsageReport) -> Double {
+        switch self {
+        case .binding: return report.maxUtilization
+        case .fiveHour: return report.fiveHour?.utilization ?? 0
+        case .weekly: return report.sevenDay?.utilization ?? 0
+        }
+    }
+}
+
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
@@ -29,15 +73,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        if let button = statusItem.button {
-            let symbol = NSImage(systemSymbolName: "flag.checkered",
-                                 accessibilityDescription: "Claude Code usage")
-                ?? NSImage(systemSymbolName: "gauge.with.needle",
-                           accessibilityDescription: "Claude Code usage")
-            button.image = symbol
-            button.imagePosition = .imageLeading
-            button.title = " …"
-        }
+        statusItem.button?.imagePosition = .imageLeading
+        updateStatusTitle()
         menu.autoenablesItems = false
         menu.delegate = self
         statusItem.menu = menu
@@ -145,20 +182,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Status item
 
+    private let statusSymbol = NSImage(systemSymbolName: "flag.checkered",
+                                       accessibilityDescription: "Claude Code usage")
+        ?? NSImage(systemSymbolName: "gauge.with.needle",
+                   accessibilityDescription: "Claude Code usage")
+
     private func updateStatusTitle() {
         guard let button = statusItem.button else { return }
+        let style = IndicatorStyle.current
+        button.image = style == .percentOnly ? nil : statusSymbol
         guard let email = activeEmail, let report = usage[email] else {
-            button.title = " –"
+            button.contentTintColor = nil
+            button.title = style == .iconOnly ? "" : " –"
             button.toolTip = activeEmail.flatMap { fetchError[$0] }
                 ?? "PitStop — no usage data yet"
             return
         }
-        let pct = Int(report.maxUtilization.rounded())
+        let pct = Int(IndicatorMetric.current.utilization(of: report).rounded())
         let isStale = fetchError[email] != nil
         let color: NSColor = isStale ? .secondaryLabelColor
             : (pct >= 90 ? .systemRed : (pct >= 75 ? .systemOrange : .labelColor))
+        // In icon-only mode the tint is the only at-a-glance signal; leave
+        // the icon untinted while healthy so it matches its neighbors.
+        button.contentTintColor = color == .labelColor ? nil : color
         button.attributedTitle = NSAttributedString(
-            string: " \(pct)%",
+            string: style == .iconOnly ? "" : " \(pct)%",
             attributes: [
                 .foregroundColor: color,
                 .font: NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .medium),
@@ -235,6 +283,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         menu.addItem(.separator())
+
+        let display = NSMenuItem(title: "Menu Bar Display", action: nil, keyEquivalent: "")
+        let displaySub = NSMenu()
+        displaySub.autoenablesItems = false
+        for style in IndicatorStyle.allCases {
+            let item = NSMenuItem(title: style.label,
+                                  action: #selector(setIndicatorStyle(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = style.rawValue
+            item.state = style == .current ? .on : .off
+            displaySub.addItem(item)
+        }
+        displaySub.addItem(.separator())
+        for metric in IndicatorMetric.allCases {
+            let item = NSMenuItem(title: metric.label,
+                                  action: #selector(setIndicatorMetric(_:)), keyEquivalent: "")
+            item.target = self
+            item.representedObject = metric.rawValue
+            item.state = metric == .current ? .on : .off
+            displaySub.addItem(item)
+        }
+        display.submenu = displaySub
+        menu.addItem(display)
 
         if Bundle.main.bundlePath.hasSuffix(".app") {
             let login = NSMenuItem(title: "Launch at Login",
@@ -359,6 +430,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func quitApp(_ sender: Any?) {
         NSApp.terminate(sender)
+    }
+
+    @objc private func setIndicatorStyle(_ sender: NSMenuItem) {
+        UserDefaults.standard.set(sender.representedObject as? String, forKey: "indicatorStyle")
+        updateStatusTitle()
+        buildMenu()
+    }
+
+    @objc private func setIndicatorMetric(_ sender: NSMenuItem) {
+        UserDefaults.standard.set(sender.representedObject as? String, forKey: "indicatorMetric")
+        updateStatusTitle()
+        buildMenu()
     }
 
     @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {

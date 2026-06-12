@@ -39,6 +39,10 @@ the one you'd switch to). Iterate on the row design with
   the last good numbers stay visible (dimmed, "as of …") during outages.
 - **Menu bar number** is the active account's binding constraint —
   `max(5-hour, weekly)` utilization. Orange ≥ 75 %, red ≥ 90 %.
+  The **Menu Bar Display** submenu customizes it: icon & percent /
+  icon only / percent only, and which limit drives the number
+  (highest / 5-hour / weekly). In icon-only mode the warning colors
+  tint the icon instead.
 - **Notifications** fire when the active account crosses 80 % and 95 %,
   with the reset time, so you can switch before sessions stall.
 - **Accounts** are snapshots of the Claude Code credential blob:

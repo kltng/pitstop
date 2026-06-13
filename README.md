@@ -24,10 +24,11 @@ that account shows up too — tagged **Desktop**, read-only (PitStop can watch
 its usage but can't switch it). One account signed into both Claude Code and
 Claude Desktop is a single shared usage pool, so it stays a single row.
 
-**OpenAI Codex** appears the same way, tagged **Codex** and read-only — its
-usage read from the local Codex login (`~/.codex/auth.json`, shared by the
-Codex CLI and the Codex app, so it's one row). Each plan's rate-limit windows
-render as bars just like Claude's 5-hour and weekly limits.
+**OpenAI Codex** appears tagged **Codex**, and you can **switch** Codex
+accounts too — its login lives in `~/.codex/auth.json` (shared by the Codex
+CLI and the Codex app), which PitStop snapshots per account and swaps the same
+way it swaps the Claude Code credential. Each plan's rate-limit windows render
+as bars just like Claude's 5-hour and weekly limits.
 
 ## Quickstart
 
@@ -104,13 +105,17 @@ Or set it up manually:
   which happens to return the same shape as the OAuth one. PitStop never
   writes to Claude Desktop's data; you can't switch a Desktop account from
   PitStop (its login lives in that app).
-- **OpenAI Codex** is read from `~/.codex/auth.json` — the ChatGPT OAuth token
-  the Codex CLI and Codex app both use — and its usage from
-  `chatgpt.com/backend-api/codex/usage`, a cheap metadata call returning each
-  rate-limit window's used-percent and reset time. Read-only; PitStop never
-  writes that file. Because the CLI and app share one login, Codex is one row.
-  Per-account state is keyed by provider, so a Claude account and a Codex
-  account that happen to share an email stay distinct rows.
+- **OpenAI Codex** uses `~/.codex/auth.json` — the ChatGPT OAuth token the
+  Codex CLI and Codex app both use — for both identity and switching. Usage
+  comes from `chatgpt.com/backend-api/codex/usage`, a cheap metadata call
+  returning each rate-limit window's used-percent and reset time. Switching is
+  the file analog of the Claude flow: PitStop snapshots the live `auth.json`
+  per account into the keychain (service `PitStop-codex`) and, on switch,
+  writes the chosen account's snapshot back into the file (compacted — JSON is
+  whitespace-insensitive, and `security` mangles multi-line secrets). The CLI
+  and app share one login, so each Codex account is one row. Per-account state
+  is keyed by provider, so a Claude account and a Codex account that happen to
+  share an email stay distinct rows.
 - **All keychain access goes through `/usr/bin/security`** — the same CLI
   Claude Code shells out to. One "Always Allow" grant (enter the keychain
   password when prompted) covers both apps and survives PitStop rebuilds,
@@ -129,20 +134,29 @@ Or set it up manually:
 
 ## Adding a second account
 
-1. PitStop auto-saves whatever account Claude Code is logged into.
-2. In Claude Code, run `/login` and sign in with the **other** account.
-3. PitStop notices the new account on its next refresh and saves it too
-   (or click **Save Current Account**).
+PitStop can only switch between accounts it has snapshotted, and it snapshots
+whatever is *live* on each refresh — so seed each account by being logged into
+it once while PitStop runs:
+
+1. PitStop auto-saves whatever account is currently live.
+2. Sign in with the **other** account — Claude Code: run `/login`; Codex: run
+   `codex` and sign in (the CLI and the Codex app share this login).
+3. PitStop notices it on the next refresh and saves it too (for Claude you can
+   also click **Save Current Account**).
 4. Both accounts now appear in the menu — click either to switch.
 
 ## What switching means for running sessions
 
-Claude Code holds its access token in memory. After a switch:
+After a switch, the live credential (Claude Code's keychain item, or Codex's
+`~/.codex/auth.json`) points at the new account:
 
 - **New sessions** use the new account immediately.
-- **Running sessions** keep working on the old account's token until it
-  expires (tokens are short-lived), then re-read the keychain and continue on
-  the new account. No restarts needed.
+- **Running Claude Code sessions** keep working on the old in-memory token
+  until it expires (tokens are short-lived), then re-read the keychain — no
+  restarts.
+- **The Codex app**, if open, may need a quit-and-reopen to pick up the swap
+  (and can overwrite `auth.json` from memory while running — switch Codex with
+  the app closed for a clean result).
 
 ## Development
 
@@ -181,11 +195,14 @@ swift scripts/make-icon.swift
   endpoints with the desktop app's own session; if those change, update
   `ClaudeDesktop.swift`. If Claude Desktop isn't installed or isn't signed
   in, nothing changes.
-- **Codex** uses the access token already in `~/.codex/auth.json` as-is —
-  PitStop doesn't refresh it (Codex keeps it fresh on use), so if you haven't
-  run Codex in a while the token can go stale and the row says so until you
-  next use Codex. No keychain prompt (it's a plain file). It reads ChatGPT's
-  unofficial backend; if that changes, update `Codex.swift`. Not installed or
-  not signed in → nothing changes.
+- **Codex** usage uses the access token in `~/.codex/auth.json` as-is — PitStop
+  doesn't refresh it (Codex keeps the *live* one fresh on use). So a saved but
+  inactive Codex account whose token has aged out shows "token expired" until
+  you switch to it and run `codex`; only the live account's usage is reliably
+  current. Reading `auth.json` needs no keychain prompt (it's a plain file),
+  though saving snapshots creates `PitStop-codex` keychain items the same
+  silent way as the Claude ones. It reads ChatGPT's unofficial backend; if that
+  changes, update `Codex.swift`. Not installed or not signed in → nothing
+  changes.
 - The usage endpoint and refresh flow are the same unofficial OAuth surface
   Claude Code itself uses; if Anthropic changes them, update `UsageAPI.swift`.

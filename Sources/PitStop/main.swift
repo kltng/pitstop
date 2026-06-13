@@ -57,19 +57,34 @@ if CommandLine.arguments.contains("--check") {
             print("\nClaude Desktop: \(error.localizedDescription)")
         }
 
-        // Codex (CLI + app share ~/.codex/auth.json; observe-only).
-        do {
-            if let (acct, usage) = try await Codex.poll() {
-                print("\n▣ \(acct.email)  [\(acct.planLabel)]  · Codex")
-                if usage.windows.isEmpty { print("   (no usage windows reported)") }
-                for w in usage.windows {
-                    print("   \(w.label.isEmpty ? "window" : w.label)  \(Format.percent(w.usedPercent))  \(Format.reset(w.resetsAt))")
-                }
-            } else if Codex.isPresent {
+        // Codex (CLI + app share ~/.codex/auth.json).
+        if Codex.isPresent {
+            let codex = CodexStore()
+            do { try await codex.captureCurrent() } catch {
+                print("\nCodex capture failed: \(error.localizedDescription)")
+            }
+            codex.load()
+            let codexLive = codex.liveEmail()
+            if codex.profiles.isEmpty {
                 print("\nCodex: installed but not signed in with a ChatGPT account")
             }
-        } catch {
-            print("\nCodex: \(error.localizedDescription)")
+            for profile in codex.profiles {
+                let isLive = profile.email == codexLive
+                print("\n\(isLive ? "▣" : "▢") \(profile.email)  [\(profile.planLabel)]  · Codex")
+                do {
+                    guard let blob = try await codex.blob(for: profile.email, isActive: isLive),
+                          let creds = Codex.credentials(from: blob) else {
+                        print("   no usable credentials"); continue
+                    }
+                    let usage = try await Codex.fetchUsage(creds)
+                    if usage.windows.isEmpty { print("   (no usage windows reported)") }
+                    for w in usage.windows {
+                        print("   \(w.label.isEmpty ? "window" : w.label)  \(Format.percent(w.usedPercent))  \(Format.reset(w.resetsAt))")
+                    }
+                } catch {
+                    print("   error: \(error.localizedDescription)")
+                }
+            }
         }
     }
     semaphore.wait()

@@ -1,23 +1,29 @@
 import Foundation
 
-/// Reads the OpenAI Codex account and its usage.
+/// Reads OpenAI Codex accounts and their usage, and is the source of truth for
+/// the Codex credential store.
 ///
 /// Codex (both the CLI and the Codex.app GUI) signs into ChatGPT and stores its
-/// OAuth tokens in `~/.codex/auth.json`. On a given Mac the app and CLI share
-/// that file (`CODEX_HOME=~/.codex`), so they're the same account — PitStop
-/// shows it as one read-only row.
+/// OAuth tokens in `~/.codex/auth.json` — a plain JSON file. On a given Mac the
+/// app and CLI share that file (`CODEX_HOME=~/.codex`), so the *live* account is
+/// whatever's in it. `CodexStore` saves snapshots of it per account so PitStop
+/// can switch between them (swapping the file), mirroring the Claude Code model
+/// — only here the live store is a file rather than a keychain item.
 ///
 /// Usage comes from `chatgpt.com/backend-api/codex/usage`, a cheap metadata GET
-/// (no model turn) that returns the account email, plan, and rate-limit windows
-/// — each a `used_percent` + reset time, which map straight onto PitStop's bars.
-///
-/// Read-only: PitStop never writes `auth.json`. The access token is used as-is
-/// (Codex keeps it fresh on use); if it's gone stale the row shows that.
+/// (no model turn) returning each rate-limit window's used-percent and reset.
 enum Codex {
     /// The Codex account identity (no secrets).
     struct Account: Equatable {
         var email: String
         var planLabel: String
+    }
+
+    /// Credentials parsed from an `auth.json` blob.
+    struct Creds {
+        var accessToken: String
+        var accountId: String
+        var account: Account
     }
 
     /// Provider-neutral usage for the row: a labelled bar per rate-limit window.
@@ -35,10 +41,12 @@ enum Codex {
     enum CodexError: LocalizedError {
         case sessionExpired
         case malformed
+        case notSignedIn
         var errorDescription: String? {
             switch self {
             case .sessionExpired: return "Codex token expired — run `codex` to refresh"
             case .malformed: return "Unexpected Codex usage response"
+            case .notSignedIn: return "Not signed in to Codex with a ChatGPT account"
             }
         }
     }
@@ -56,11 +64,62 @@ enum Codex {
     private static let usageURL =
         URL(string: "https://chatgpt.com/backend-api/codex/usage")!
 
-    /// Fetch the Codex account and its usage. Returns nil when Codex isn't
-    /// installed or isn't signed in with a ChatGPT account; throws (expired /
-    /// rate-limited / malformed) when it is but the fetch fails.
-    static func poll() async throws -> (account: Account, usage: Usage)? {
-        guard let creds = readAuth() else { return nil }
+    // MARK: - Credentials
+
+    /// The current `~/.codex/auth.json` contents, or nil if absent.
+    static func liveBlob() -> Data? { try? Data(contentsOf: authURL) }
+
+    /// Re-serialize an auth blob as compact, key-sorted JSON. The keychain read
+    /// path (`security -w`) hex-encodes any secret containing newlines, and
+    /// Codex writes `auth.json` pretty-printed — so it must be flattened before
+    /// it's stored, or it reads back as a hex string and corrupts the file on
+    /// restore. JSON is whitespace-insensitive, so Codex reads the compact form
+    /// back fine; sorted keys make the bytes stable for change detection.
+    static func normalizedBlob(_ data: Data) -> Data {
+        guard let obj = try? JSONSerialization.jsonObject(with: data),
+              let compact = try? JSONSerialization.data(withJSONObject: obj,
+                                                        options: [.sortedKeys]) else {
+            return data
+        }
+        return compact
+    }
+
+    /// Parse a ChatGPT (not API-key) Codex auth blob into credentials +
+    /// identity. Returns nil for API-key auth or a blob without ChatGPT tokens.
+    static func credentials(from blob: Data) -> Creds? {
+        guard let root = try? JSONSerialization.jsonObject(with: blob) as? [String: Any],
+              let tokens = root["tokens"] as? [String: Any],
+              let access = tokens["access_token"] as? String, !access.isEmpty,
+              let accountId = tokens["account_id"] as? String,
+              let idToken = tokens["id_token"] as? String else {
+            return nil
+        }
+        let claims = decodeJWTClaims(idToken)
+        let email = claims?["email"] as? String ?? "Codex account"
+        let auth = claims?["https://api.openai.com/auth"] as? [String: Any]
+        let plan = (auth?["chatgpt_plan_type"] as? String)
+            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
+        return Creds(accessToken: access, accountId: accountId,
+                     account: Account(email: email, planLabel: plan ?? ""))
+    }
+
+    /// Decode (without verifying) the claims of a JWT.
+    private static func decodeJWTClaims(_ jwt: String) -> [String: Any]? {
+        let parts = jwt.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var s = String(parts[1])
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        while s.count % 4 != 0 { s += "=" }
+        guard let data = Data(base64Encoded: s) else { return nil }
+        return try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    }
+
+    // MARK: - Usage fetch
+
+    /// Live usage for one account's credentials. Throws `.sessionExpired` on a
+    /// 401/403 (its token has gone stale — Codex only keeps the live one fresh).
+    static func fetchUsage(_ creds: Creds) async throws -> Usage {
         var req = URLRequest(url: usageURL)
         req.setValue("Bearer \(creds.accessToken)", forHTTPHeaderField: "Authorization")
         req.setValue(creds.accountId, forHTTPHeaderField: "chatgpt-account-id")
@@ -75,26 +134,26 @@ enum Codex {
             throw UsageAPI.APIError.rateLimited(retryAfter: retryAfter)
         }
         guard http.statusCode == 200 else { throw UsageAPI.APIError.http(http.statusCode) }
-        return try parse(data)
+        return try parseUsage(data)
     }
 
-    // MARK: - Parsing
+    /// Convenience for the live account (used by `--check`).
+    static func poll() async throws -> (account: Account, usage: Usage)? {
+        guard let blob = liveBlob(), let creds = credentials(from: blob) else { return nil }
+        return (creds.account, try await fetchUsage(creds))
+    }
 
-    private static func parse(_ data: Data) throws -> (Account, Usage) {
-        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let email = root["email"] as? String else {
+    private static func parseUsage(_ data: Data) throws -> Usage {
+        guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             throw CodexError.malformed
         }
-        let plan = (root["plan_type"] as? String).map { $0.prefix(1).uppercased() + $0.dropFirst() }
-        let account = Account(email: email, planLabel: plan ?? "")
-
         var windows: [Usage.Window] = []
         if let rl = root["rate_limit"] as? [String: Any] {
             for key in ["primary_window", "secondary_window"] {
                 if let w = window(rl[key]) { windows.append(w) }
             }
         }
-        return (account, Usage(windows: windows))
+        return Usage(windows: windows)
     }
 
     private static func window(_ any: Any?) -> Usage.Window? {
@@ -113,22 +172,5 @@ enum Codex {
         if seconds % 86400 == 0 { return "\(seconds / 86400)d" }
         if seconds % 3600 == 0 { return "\(seconds / 3600)h" }
         return "\(seconds / 60)m"
-    }
-
-    // MARK: - Auth file
-
-    private struct Creds { var accessToken: String; var accountId: String }
-
-    /// Read the ChatGPT access token + account id from `~/.codex/auth.json`.
-    /// Returns nil for API-key auth or when not signed in (no usable token).
-    private static func readAuth() -> Creds? {
-        guard let data = try? Data(contentsOf: authURL),
-              let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let tokens = root["tokens"] as? [String: Any],
-              let access = tokens["access_token"] as? String, !access.isEmpty,
-              let account = tokens["account_id"] as? String else {
-            return nil
-        }
-        return Creds(accessToken: access, accountId: account)
     }
 }

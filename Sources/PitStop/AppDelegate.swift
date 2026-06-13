@@ -60,12 +60,18 @@ struct MenuAccount {
     var source: Source
     var planLabel: String
     var isActive: Bool
-    var profile: Profile?       // present for .code / .both
 
     var isCodex: Bool { source == .codex }
-    /// Only Claude Code accounts can be switched into (they own the live
-    /// credential blob); Desktop and Codex are observe-only.
-    var canSwitch: Bool { profile != nil }
+    /// Switchable providers: Claude Code (owns the live credential keychain
+    /// item) and Codex (owns ~/.codex/auth.json). Desktop is observe-only — its
+    /// login lives in that app. The live account of each is filtered out by the
+    /// `!isActive` guard at the call site (it's already current).
+    var canSwitch: Bool {
+        switch source {
+        case .code, .both, .codex: return true
+        case .desktop: return false
+        }
+    }
     /// Storage key for usage/error/backoff dicts — namespaced by provider so a
     /// Claude and a Codex account with the same email don't collide.
     var key: String { isCodex ? "codex:\(email)" : email }
@@ -92,8 +98,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// The account Claude Desktop is logged into, if any (read-only — PitStop
     /// can show its usage but can't switch it). Discovered on each refresh.
     private var desktopAccount: ClaudeDesktop.Account?
-    /// The OpenAI Codex account (CLI + app share one), if any — read-only.
-    private var codexAccount: Codex.Account?
+    /// Saved OpenAI Codex accounts (CLI + app share `~/.codex/auth.json`).
+    /// Switchable like Claude Code, but the live store is that file.
+    private let codexStore = CodexStore()
+    /// The email currently live in `~/.codex/auth.json`.
+    private var codexLiveEmail: String?
     /// Codex usage, keyed by the codex storage key ("codex:<email>").
     private var codexUsage: [String: Codex.Usage] = [:]
     /// Last successful report per account — kept on fetch failure so the
@@ -134,7 +143,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func allEmails() -> [String] {
         var emails = store.profiles.map(\.email)
         if let d = desktopAccount, !emails.contains(d.email) { emails.append(d.email) }
-        if let c = codexAccount, !emails.contains(c.email) { emails.append(c.email) }
+        for c in codexStore.profiles where !emails.contains(c.email) { emails.append(c.email) }
         return emails
     }
 
@@ -314,22 +323,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// Discover the OpenAI Codex account (CLI + app share `~/.codex/auth.json`)
-    /// and fetch its usage. Read-only and best-effort, mirroring Desktop.
+    /// Snapshot the live Codex account, then fetch usage for every saved Codex
+    /// account. Codex keeps only the *live* token fresh, so an inactive saved
+    /// account whose token has aged out shows `.sessionExpired` until it's
+    /// switched to and refreshed by Codex itself (PitStop doesn't refresh
+    /// Codex tokens). Best-effort, mirroring the Claude paths.
     private func refreshCodexAccount() async {
-        let knownKey = codexAccount.map { "codex:\($0.email)" }
-        guard knownKey.map(passedBackoffGate) ?? true else { return }
+        guard Codex.isPresent else { return }
         do {
-            guard let (account, usage) = try await Codex.poll() else {
-                codexAccount = nil
-                return
-            }
-            codexAccount = account
-            let key = "codex:\(account.email)"
-            codexUsage[key] = usage
-            clearFetchError(for: key)
+            try await codexStore.captureCurrent()
         } catch {
-            if let key = knownKey { recordFetchError(error, for: key) }
+            lastTopLevelError = error.localizedDescription
+        }
+        codexStore.load()
+        codexLiveEmail = codexStore.liveEmail()
+
+        for profile in codexStore.profiles {
+            let key = "codex:\(profile.email)"
+            guard passedBackoffGate(key) else { continue }
+            do {
+                guard let blob = try await codexStore.blob(
+                        for: profile.email, isActive: profile.email == codexLiveEmail),
+                      let creds = Codex.credentials(from: blob) else {
+                    recordFetchError(Codex.CodexError.sessionExpired, for: key)
+                    continue
+                }
+                codexUsage[key] = try await Codex.fetchUsage(creds)
+                clearFetchError(for: key)
+            } catch {
+                recordFetchError(error, for: key)
+            }
         }
     }
 
@@ -474,17 +497,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return MenuAccount(email: profile.email,
                                source: onDesktop ? .both : .code,
                                planLabel: profile.planLabel,
-                               isActive: profile.email == activeEmail,
-                               profile: profile)
+                               isActive: profile.email == activeEmail)
         }
         if let d = desktopAccount,
            !store.profiles.contains(where: { $0.email == d.email }) {
             rows.append(MenuAccount(email: d.email, source: .desktop,
-                                    planLabel: d.planLabel, isActive: false, profile: nil))
+                                    planLabel: d.planLabel, isActive: false))
         }
-        if let c = codexAccount {
+        for c in codexStore.profiles {
             rows.append(MenuAccount(email: c.email, source: .codex,
-                                    planLabel: c.planLabel, isActive: false, profile: nil))
+                                    planLabel: c.planLabel,
+                                    isActive: c.email == codexLiveEmail))
         }
         return rows
     }
@@ -500,7 +523,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func usageHeaderTitle() -> String {
         let hasClaude = !store.profiles.isEmpty || desktopAccount != nil
         let claudeLabel = desktopAccount == nil ? "Claude Code" : "Claude"
-        switch (hasClaude, codexAccount != nil) {
+        switch (hasClaude, !codexStore.profiles.isEmpty) {
         case (true, true): return "\(claudeLabel) & Codex Usage"
         case (false, true): return "Codex Usage"
         default: return "\(claudeLabel) Usage"
@@ -542,16 +565,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         save.target = self
         menu.addItem(save)
 
-        let removable = store.profiles.filter { $0.email != activeEmail }
+        // Removable = saved accounts that aren't the live one of their provider.
+        // Titles carry a "· Codex" tag so a Claude and a Codex account sharing
+        // an email are distinguishable; the represented object is the
+        // provider-namespaced key the remove action routes on.
+        var removable: [(title: String, key: String)] = store.profiles
+            .filter { $0.email != activeEmail }
+            .map { (displayEmail($0.email), $0.email) }
+        removable += codexStore.profiles
+            .filter { $0.email != codexLiveEmail }
+            .map { ("\(displayEmail($0.email)) · Codex", "codex:\($0.email)") }
         if !removable.isEmpty {
             let removeRoot = NSMenuItem(title: "Remove Account", action: nil, keyEquivalent: "")
             let sub = NSMenu()
             sub.autoenablesItems = false
-            for profile in removable {
-                let item = NSMenuItem(title: displayEmail(profile.email),
+            for entry in removable {
+                let item = NSMenuItem(title: entry.title,
                                       action: #selector(removeAccount(_:)), keyEquivalent: "")
                 item.target = self
-                item.representedObject = profile.email
+                item.representedObject = entry.key
                 sub.addItem(item)
             }
             removeRoot.submenu = sub
@@ -668,6 +700,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         let canSwitch = account.canSwitch && !account.isActive
+        let isCodex = account.isCodex
         return AccountRowView.Model(
             email: displayEmail(email),
             planLabel: account.planLabel,
@@ -676,7 +709,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             bars: bars,
             modelsLine: extras.isEmpty ? nil : extras.joined(separator: " · "),
             statusLine: status,
-            onSwitch: canSwitch ? { [weak self] in self?.performSwitch(to: email) } : nil)
+            onSwitch: canSwitch ? { [weak self] in
+                if isCodex { self?.performCodexSwitch(to: email) }
+                else { self?.performSwitch(to: email) }
+            } : nil)
     }
 
     private func addDisabled(_ text: String) {
@@ -720,6 +756,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Switch the live Codex account by swapping `~/.codex/auth.json`.
+    private func performCodexSwitch(to email: String) {
+        Task {
+            do {
+                try await codexStore.switchTo(email: email)
+                codexLiveEmail = email
+                Notifier.shared.post(
+                    title: "Switched Codex to \(displayEmail(email))",
+                    body: "New `codex` sessions use this account. Quit and reopen the Codex app to pick it up.")
+                refreshAll()
+            } catch {
+                showError("Couldn't switch Codex account", error)
+            }
+        }
+    }
+
     @objc private func saveCurrent(_ sender: Any?) {
         Task {
             do {
@@ -738,14 +790,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func removeAccount(_ sender: NSMenuItem) {
-        guard let email = sender.representedObject as? String else { return }
+        guard let key = sender.representedObject as? String else { return }
         Task {
             do {
-                try await store.remove(email: email)
-                usage[email] = nil
-                fetchError[email] = nil
-                nextFetchAllowed[email] = nil
-                failureCount[email] = nil
+                if key.hasPrefix("codex:") {
+                    let email = String(key.dropFirst("codex:".count))
+                    try await codexStore.remove(email: email)
+                    codexUsage[key] = nil
+                } else {
+                    try await store.remove(email: key)
+                    usage[key] = nil
+                }
+                fetchError[key] = nil
+                nextFetchAllowed[key] = nil
+                failureCount[key] = nil
                 buildMenu()
             } catch {
                 showError("Couldn't remove account", error)

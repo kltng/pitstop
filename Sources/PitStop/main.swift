@@ -140,6 +140,12 @@ if CommandLine.arguments.contains("--preview") {
                   bars: [.init(label: "30d", utilization: 20,
                                resetText: Format.compactReset(nextWeek))],
                   modelsLine: nil, statusLine: nil, onSwitch: nil),
+            .init(email: "codex-live@example.com",
+                  planLabel: "Free", isActive: true, sourceBadge: "Codex",
+                  bars: [],
+                  modelsLine: nil,
+                  statusLine: "Usage updates when Codex next saves its token",
+                  statusIsInfo: true, onSwitch: nil),
         ]
         // Middle row rendered in its hover state to preview the Switch pill.
         let views = models.enumerated().map { i, m in

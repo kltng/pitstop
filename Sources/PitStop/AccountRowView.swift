@@ -19,6 +19,7 @@ final class AccountRowView: NSView {
         var bars: [BarRow]
         var modelsLine: String?    // "Opus wk 12% · Sonnet wk 10%"
         var statusLine: String?    // error / stale / loading info
+        var statusIsInfo: Bool = false  // muted (neutral) vs orange (warning)
         var onSwitch: (() -> Void)?  // nil = active (not clickable)
     }
 
@@ -208,11 +209,15 @@ final class AccountRowView: NSView {
             y += 15
         }
 
-        // Error / stale / loading line
+        // Error / stale / loading line — orange for warnings, muted for
+        // neutral info (e.g. the live Codex account waiting on its own refresh).
         if let status = model.statusLine {
             status.draw(at: NSPoint(x: barX, y: y + 1),
-                        withAttributes: [.font: NSFont.systemFont(ofSize: 10.5),
-                                         .foregroundColor: NSColor.systemOrange])
+                        withAttributes: [
+                            .font: NSFont.systemFont(ofSize: 10.5),
+                            .foregroundColor: model.statusIsInfo
+                                ? NSColor.secondaryLabelColor : NSColor.systemOrange,
+                        ])
         }
     }
 }

@@ -354,13 +354,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 clearFetchError(for: key)
             } catch {
                 recordFetchError(error, for: key)
-                // Expired-token wording depends on the fix: the live account is
-                // refreshed by running codex; an inactive one only reaches here
-                // when its refresh token is itself dead, so it needs a re-login.
-                if case Codex.CodexError.sessionExpired = error {
-                    fetchError[key] = isLive
-                        ? "Codex token expired — run codex to refresh"
-                        : "Codex session ended — sign in to Codex again"
+                // An inactive account only reaches the expired state when its
+                // refresh token is itself dead — it needs a re-login. (The live
+                // account's stale token is shown neutrally in rowModel; Codex
+                // refreshes it itself.)
+                if case Codex.CodexError.sessionExpired = error, !isLive {
+                    fetchError[key] = "Codex session ended — sign in to Codex again"
                 }
             }
         }
@@ -722,7 +721,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         var status: String?
-        if let err = fetchError[key] {
+        var statusIsInfo = false
+        if account.isCodex, account.isActive, needsAction.contains(key) {
+            // The live Codex account's on-disk token is stale, but PitStop
+            // won't refresh it (that would rotate the token Codex is running
+            // on). Codex rewrites it on its own next refresh — so this is
+            // informational, not a warning the user must act on.
+            status = dataDate.map {
+                "Usage updates when Codex next saves its token · last seen \(Format.updated.string(from: $0))"
+            } ?? "Usage updates when Codex next saves its token"
+            statusIsInfo = true
+        } else if let err = fetchError[key] {
             var text = err
             // Only promise a retry for backoff errors (rate limits) that will
             // recover on their own — not for ones needing the user to act.
@@ -749,6 +758,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             bars: bars,
             modelsLine: extras.isEmpty ? nil : extras.joined(separator: " · "),
             statusLine: status,
+            statusIsInfo: statusIsInfo,
             onSwitch: canSwitch ? { [weak self] in
                 if isCodex { self?.performCodexSwitch(to: email) }
                 else { self?.performSwitch(to: email) }

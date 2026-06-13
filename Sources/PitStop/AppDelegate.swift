@@ -333,10 +333,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Snapshot the live Codex account, then fetch usage for every saved Codex
-    /// account. Codex keeps only the *live* token fresh, so an inactive saved
-    /// account whose token has aged out shows `.sessionExpired` until it's
-    /// switched to and refreshed by Codex itself (PitStop doesn't refresh
-    /// Codex tokens). Best-effort, mirroring the Claude paths.
+    /// account — refreshing an inactive account's token if it has aged out
+    /// (Codex keeps only the live one fresh). Best-effort, mirroring Claude.
     private func refreshCodexAccount() async {
         guard Codex.isPresent else { return }
         do {
@@ -350,18 +348,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for profile in codexStore.profiles {
             let key = "codex:\(profile.email)"
             guard passedBackoffGate(key) else { continue }
+            let isLive = profile.email == codexLiveEmail
             do {
-                guard let blob = try await codexStore.blob(
-                        for: profile.email, isActive: profile.email == codexLiveEmail),
-                      let creds = Codex.credentials(from: blob) else {
-                    recordFetchError(Codex.CodexError.sessionExpired, for: key)
-                    continue
-                }
-                codexUsage[key] = try await Codex.fetchUsage(creds)
+                codexUsage[key] = try await fetchCodexUsage(for: profile.email, isActive: isLive)
                 clearFetchError(for: key)
             } catch {
                 recordFetchError(error, for: key)
+                // Expired-token wording depends on the fix: the live account is
+                // refreshed by running codex; an inactive one only reaches here
+                // when its refresh token is itself dead, so it needs a re-login.
+                if case Codex.CodexError.sessionExpired = error {
+                    fetchError[key] = isLive
+                        ? "Codex token expired — run codex to refresh"
+                        : "Codex session ended — sign in to Codex again"
+                }
             }
+        }
+    }
+
+    /// Fetch one Codex account's usage, refreshing its token on a 401 and
+    /// retrying once. Only inactive accounts are refreshed — Codex owns the
+    /// live one, so PitStop never rewrites the live `auth.json` here; the
+    /// rotated tokens are persisted to the saved snapshot for the next fetch
+    /// and any later switch. After a refresh the persisted token is fresh, so
+    /// it won't re-refresh until it genuinely expires (~hourly), not every cycle.
+    private func fetchCodexUsage(for email: String, isActive: Bool) async throws -> Codex.Usage {
+        guard let blob = try await codexStore.blob(for: email, isActive: isActive),
+              let creds = Codex.credentials(from: blob) else {
+            throw Codex.CodexError.sessionExpired
+        }
+        do {
+            return try await Codex.fetchUsage(creds)
+        } catch Codex.CodexError.sessionExpired where !isActive {
+            // Inactive token aged out — rotate it and retry once.
+            guard let refreshToken = creds.refreshToken else {
+                throw Codex.CodexError.sessionExpired
+            }
+            let refreshed = try await Codex.refresh(refreshToken: refreshToken)
+            guard let patched = Codex.patching(blob, with: refreshed),
+                  let fresh = Codex.credentials(from: patched) else {
+                throw Codex.CodexError.malformed
+            }
+            try await codexStore.storeRefreshedBlob(patched, email: email)
+            return try await Codex.fetchUsage(fresh)
         }
     }
 

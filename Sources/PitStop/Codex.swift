@@ -22,9 +22,14 @@ enum Codex {
     /// Credentials parsed from an `auth.json` blob.
     struct Creds {
         var accessToken: String
+        var refreshToken: String?
         var accountId: String
         var account: Account
     }
+
+    /// Codex CLI's public OAuth client (the `aud` claim of its id_token).
+    static let clientID = "app_EMoamEEZ73f0CkXaXp7hrann"
+    private static let tokenURL = URL(string: "https://auth.openai.com/oauth/token")!
 
     /// Provider-neutral usage for the row: a labelled bar per rate-limit window.
     struct Usage {
@@ -44,7 +49,7 @@ enum Codex {
         case notSignedIn
         var errorDescription: String? {
             switch self {
-            case .sessionExpired: return "Codex token expired — switch to refresh it"
+            case .sessionExpired: return "Codex token expired"
             case .malformed: return "Unexpected Codex usage response"
             case .notSignedIn: return "Not signed in to Codex with a ChatGPT account"
             }
@@ -99,7 +104,9 @@ enum Codex {
         let auth = claims?["https://api.openai.com/auth"] as? [String: Any]
         let plan = (auth?["chatgpt_plan_type"] as? String)
             .map { $0.prefix(1).uppercased() + $0.dropFirst() }
-        return Creds(accessToken: access, accountId: accountId,
+        return Creds(accessToken: access,
+                     refreshToken: tokens["refresh_token"] as? String,
+                     accountId: accountId,
                      account: Account(email: email, planLabel: plan ?? ""))
     }
 
@@ -142,6 +149,58 @@ enum Codex {
         guard let blob = liveBlob(), let creds = credentials(from: blob) else { return nil }
         return (creds.account, try await fetchUsage(creds))
     }
+
+    // MARK: - Token refresh
+
+    struct Refreshed { var accessToken: String; var refreshToken: String?; var idToken: String? }
+
+    /// Exchange a refresh token for fresh tokens via the ChatGPT OAuth token
+    /// endpoint. Used only for inactive saved accounts (Codex keeps the live
+    /// one fresh itself). Throws `.sessionExpired` if the refresh token is
+    /// rejected — it won't recover without a re-login.
+    static func refresh(refreshToken: String) async throws -> Refreshed {
+        var req = URLRequest(url: tokenURL)
+        req.httpMethod = "POST"
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 15
+        req.httpBody = try JSONSerialization.data(withJSONObject: [
+            "grant_type": "refresh_token",
+            "refresh_token": refreshToken,
+            "client_id": clientID,
+        ])
+        let (data, resp) = try await URLSession.shared.data(for: req)
+        guard let http = resp as? HTTPURLResponse else { throw CodexError.malformed }
+        if http.statusCode == 400 || http.statusCode == 401 || http.statusCode == 403 {
+            throw CodexError.sessionExpired
+        }
+        guard http.statusCode == 200,
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let access = root["access_token"] as? String else {
+            throw CodexError.malformed
+        }
+        return Refreshed(accessToken: access,
+                         refreshToken: root["refresh_token"] as? String,
+                         idToken: root["id_token"] as? String)
+    }
+
+    /// Return a copy of `blob` with refreshed tokens patched into `tokens`,
+    /// leaving every other field (auth_mode, OPENAI_API_KEY, …) untouched.
+    static func patching(_ blob: Data, with refreshed: Refreshed) -> Data? {
+        guard var root = (try? JSONSerialization.jsonObject(with: blob)) as? [String: Any],
+              var tokens = root["tokens"] as? [String: Any] else { return nil }
+        tokens["access_token"] = refreshed.accessToken
+        if let rt = refreshed.refreshToken { tokens["refresh_token"] = rt }
+        if let idt = refreshed.idToken { tokens["id_token"] = idt }
+        root["tokens"] = tokens
+        root["last_refresh"] = iso8601.string(from: Date())
+        return try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
+    }
+
+    private static let iso8601: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return f
+    }()
 
     private static func parseUsage(_ data: Data) throws -> Usage {
         guard let root = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {

@@ -76,7 +76,20 @@ if CommandLine.arguments.contains("--check") {
                           let creds = Codex.credentials(from: blob) else {
                         print("   no usable credentials"); continue
                     }
-                    let usage = try await Codex.fetchUsage(creds)
+                    var usage: Codex.Usage
+                    do {
+                        usage = try await Codex.fetchUsage(creds)
+                    } catch Codex.CodexError.sessionExpired where !isLive {
+                        guard let rt = creds.refreshToken else { throw Codex.CodexError.sessionExpired }
+                        print("   token expired — refreshing…")
+                        let refreshed = try await Codex.refresh(refreshToken: rt)
+                        guard let patched = Codex.patching(blob, with: refreshed),
+                              let fresh = Codex.credentials(from: patched) else {
+                            throw Codex.CodexError.malformed
+                        }
+                        try await codex.storeRefreshedBlob(patched, email: profile.email)
+                        usage = try await Codex.fetchUsage(fresh)
+                    }
                     if usage.windows.isEmpty { print("   (no usage windows reported)") }
                     for w in usage.windows {
                         print("   \(w.label.isEmpty ? "window" : w.label)  \(Format.percent(w.usedPercent))  \(Format.reset(w.resetsAt))")

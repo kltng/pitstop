@@ -126,6 +126,14 @@ final class CodexStore {
         return try await Keychain.read(service: Self.service, account: email)
     }
 
+    /// Persist a saved snapshot whose tokens PitStop refreshed itself, so the
+    /// next fetch (and any later switch) uses the rotated tokens. Only inactive
+    /// accounts are refreshed, so this never touches the live `auth.json`.
+    func storeRefreshedBlob(_ data: Data, email: String) async throws {
+        try await Keychain.upsert(service: Self.service, account: email,
+                                  data: Codex.normalizedBlob(data))
+    }
+
     /// Write a blob into the live `auth.json`, preserving its `600` mode (it
     /// holds secrets). Atomic so a crash can't leave a half-written file.
     private func writeLive(_ blob: Data) throws {

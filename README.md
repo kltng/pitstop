@@ -112,10 +112,14 @@ Or set it up manually:
   the file analog of the Claude flow: PitStop snapshots the live `auth.json`
   per account into the keychain (service `PitStop-codex`) and, on switch,
   writes the chosen account's snapshot back into the file (compacted — JSON is
-  whitespace-insensitive, and `security` mangles multi-line secrets). The CLI
-  and app share one login, so each Codex account is one row. Per-account state
-  is keyed by provider, so a Claude account and a Codex account that happen to
-  share an email stay distinct rows.
+  whitespace-insensitive, and `security` mangles multi-line secrets). Inactive
+  snapshots whose access token has aged out are refreshed via the ChatGPT
+  OAuth refresh grant (against Codex's public client) and the rotated tokens
+  stored back, so an inactive account shows live usage and a switch into it
+  lands a fresh token — the *live* account is left to Codex, which keeps it
+  fresh itself. The CLI and app share one login, so each Codex account is one
+  row. Per-account state is keyed by provider, so a Claude account and a Codex
+  account that happen to share an email stay distinct rows.
 - **All keychain access goes through `/usr/bin/security`** — the same CLI
   Claude Code shells out to. One "Always Allow" grant (enter the keychain
   password when prompted) covers both apps and survives PitStop rebuilds,
@@ -195,14 +199,16 @@ swift scripts/make-icon.swift
   endpoints with the desktop app's own session; if those change, update
   `ClaudeDesktop.swift`. If Claude Desktop isn't installed or isn't signed
   in, nothing changes.
-- **Codex** usage uses the access token in `~/.codex/auth.json` as-is — PitStop
-  doesn't refresh it (Codex keeps the *live* one fresh on use). So a saved but
-  inactive Codex account whose token has aged out shows "token expired" until
-  you switch to it and run `codex`; only the live account's usage is reliably
-  current. Reading `auth.json` needs no keychain prompt (it's a plain file),
-  though saving snapshots creates `PitStop-codex` keychain items the same
-  silent way as the Claude ones. It reads ChatGPT's unofficial backend; if that
-  changes, update `Codex.swift`. Not installed or not signed in → nothing
-  changes.
+- **Codex** keeps inactive snapshots fresh via the OAuth refresh grant, but
+  the *live* account is Codex's to maintain — PitStop never rewrites the live
+  `auth.json` on a refresh cycle. So if the live account's token is expired
+  (e.g. right after switching into an account whose snapshot was stale), its
+  row says "run codex to refresh" — running `codex` (or any use) refreshes it.
+  An inactive account only shows "sign in to Codex again" if its refresh token
+  is itself dead. Reading `auth.json` needs no keychain prompt (it's a plain
+  file); saving/refreshing snapshots creates `PitStop-codex` keychain items the
+  same silent way as the Claude ones. It reads ChatGPT's unofficial backend and
+  OAuth endpoints; if those change, update `Codex.swift`. Not installed or not
+  signed in → nothing changes.
 - The usage endpoint and refresh flow are the same unofficial OAuth surface
   Claude Code itself uses; if Anthropic changes them, update `UsageAPI.swift`.

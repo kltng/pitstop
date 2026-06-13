@@ -125,8 +125,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Recent (time, binding-utilization) samples per account key, for the
     /// time-to-limit projection. In-memory only; cleared on a window reset.
     private var usageHistory: [String: [(date: Date, util: Double)]] = [:]
-    /// When PitStop last auto-switched, to avoid flapping.
-    private var lastAutoSwitch: Date?
+    /// When PitStop last auto-switched each provider, to avoid flapping.
+    private var lastAutoSwitch: [Provider: Date] = [:]
     /// Last successful report per account — kept on fetch failure so the
     /// display degrades to stale data instead of going blank.
     private var usage: [String: UsageReport] = [:]
@@ -880,31 +880,44 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
-    /// When enabled, flip the live Claude Code account to the saved account with
-    /// the most headroom once the active one crosses the threshold. Claude Code
-    /// only — it's the account the menu bar tracks and the one with a clear
-    /// "active" notion; a cooldown keeps it from flapping.
+    /// When enabled, flip each switchable provider's live account to the saved
+    /// account with the most headroom once the live one crosses the threshold.
+    /// Desktop is read-only, so it's left alone.
     private func evaluateAutoSwitch() {
-        guard Settings.autoSwitchEnabled,
-              let active = activeEmail, let report = usage[active],
-              fetchError[active] == nil else { return }
+        guard Settings.autoSwitchEnabled else { return }
+        autoSwitch(provider: .claude, live: activeEmail,
+                   candidates: store.profiles.map(\.email),
+                   utilization: { fetchError[$0] == nil ? usage[$0]?.maxUtilization : nil },
+                   perform: { performSwitch(to: $0, auto: true, reason: $1) })
+        autoSwitch(provider: .codex, live: codexLiveEmail,
+                   candidates: codexStore.profiles.map(\.email),
+                   utilization: {
+                       let key = "codex:\($0)"
+                       return fetchError[key] == nil ? codexUsage[key]?.maxUtilization : nil
+                   },
+                   perform: { performCodexSwitch(to: $0, auto: true, reason: $1) })
+    }
+
+    /// Switch `live` to the emptiest candidate below the threshold when it's
+    /// over. `utilization` returns nil for accounts without trustworthy data
+    /// (errored / stale), so PitStop never switches onto a broken account or
+    /// acts on a transient fetch error. A per-provider cooldown stops flapping.
+    private func autoSwitch(provider: Provider, live: String?, candidates: [String],
+                            utilization: (String) -> Double?,
+                            perform: (String, String) -> Void) {
+        guard let live, let liveUtil = utilization(live) else { return }
         let threshold = Double(Settings.autoSwitchThreshold)
-        guard report.maxUtilization >= threshold else { return }
-        if let last = lastAutoSwitch, Date().timeIntervalSince(last) < 180 { return }
-        // Emptiest saved Claude account that still has real headroom.
-        let target = store.profiles
-            .filter { $0.email != active }
-            .compactMap { p -> (String, Double)? in
-                guard let r = usage[p.email], fetchError[p.email] == nil else { return nil }
-                return (p.email, r.maxUtilization)
-            }
-            .filter { $0.1 < threshold }
-            .min { $0.1 < $1.1 }
-        guard let target else { return }   // nowhere better to go
-        lastAutoSwitch = Date()
-        performSwitch(to: target.0, auto: true, reason:
-            "\(displayEmail(active)) hit \(Int(report.maxUtilization.rounded()))% — "
-            + "moved to \(displayEmail(target.0)) (\(Int(target.1.rounded()))% used).")
+        guard liveUtil >= threshold else { return }
+        if let last = lastAutoSwitch[provider], Date().timeIntervalSince(last) < 180 { return }
+        guard let target = candidates
+            .filter({ $0 != live })
+            .compactMap({ e in utilization(e).map { (e, $0) } })
+            .filter({ $0.1 < threshold })
+            .min(by: { $0.1 < $1.1 }) else { return }   // nowhere better to go
+        lastAutoSwitch[provider] = Date()
+        perform(target.0,
+                "\(displayEmail(live)) hit \(Int(liveUtil.rounded()))% — "
+                + "moved to \(displayEmail(target.0)) (\(Int(target.1.rounded()))% used).")
     }
 
     // MARK: - Usage projection
@@ -941,14 +954,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     /// Switch the live Codex account by swapping `~/.codex/auth.json`.
-    private func performCodexSwitch(to email: String) {
+    private func performCodexSwitch(to email: String, auto: Bool = false, reason: String? = nil) {
         Task {
             do {
                 try await codexStore.switchTo(email: email)
                 codexLiveEmail = email
                 Notifier.shared.post(
-                    title: "Switched Codex to \(displayEmail(email))",
-                    body: "New `codex` sessions use this account. Quit and reopen the Codex app to pick it up.")
+                    title: auto ? "Auto-switched Codex to \(displayEmail(email))"
+                                : "Switched Codex to \(displayEmail(email))",
+                    body: reason ?? "New `codex` sessions use this account. Quit and reopen the Codex app to pick it up.")
                 refreshAll()
             } catch {
                 showError("Couldn't switch Codex account", error)

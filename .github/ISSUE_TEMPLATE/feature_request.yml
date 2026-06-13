@@ -1,0 +1,28 @@
+name: Feature request
+description: Suggest an idea for PitStop
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For non-trivial features, this helps check it's a direction the project
+        wants before anyone writes code.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: What are you trying to do that's awkward or impossible today?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Proposed solution
+    validations:
+      required: false
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+    validations:
+      required: false

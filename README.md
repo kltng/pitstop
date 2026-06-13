@@ -204,6 +204,14 @@ checkered pit-lane strip) is drawn programmatically — regenerate
 swift scripts/make-icon.swift
 ```
 
+## Contributing
+
+Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for build
+steps, style, and how to add a provider. Please open an issue before anything
+non-trivial. Because PitStop handles live credentials, report security issues
+**privately** per the [security policy](SECURITY.md), not as a public issue. By
+participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ### Caveats
 
 - Keychain prompts are **one-time per item**: when `security` first touches

@@ -1,0 +1,52 @@
+name: Bug report
+description: Something in PitStop isn't working right
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please **mask any real account emails** and never
+        paste tokens or credentials.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+    validations:
+      required: true
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Which provider / surface?
+      options:
+        - Claude Code
+        - Claude Desktop
+        - OpenAI Codex
+        - Menu bar / Settings
+        - Not sure
+    validations:
+      required: false
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "e.g. 26.1"
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: PitStop commit
+      placeholder: "git rev-parse --short HEAD"
+  - type: textarea
+    id: check
+    attributes:
+      label: "`--check` output (mask emails)"
+      description: "Output of `.build/release/PitStop --check`, with emails masked."
+      render: text

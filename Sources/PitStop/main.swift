@@ -115,9 +115,11 @@ if CommandLine.arguments.contains("--preview") {
         let models: [AccountRowView.Model] = [
             .init(email: "asha@acme.dev",
                   planLabel: "Acme AI · Team · 5x", isActive: true,
-                  bars: [.init(label: "5h", utilization: 20, resetText: Format.compactReset(tonight)),
+                  bars: [.init(label: "5h", utilization: 64, resetText: Format.compactReset(tonight)),
                          .init(label: "7d", utilization: 23, resetText: Format.compactReset(nextWeek))],
-                  modelsLine: nil, statusLine: nil, onSwitch: nil),
+                  modelsLine: nil,
+                  projectionLine: "↗ on pace to hit limit ~4:10 PM",
+                  statusLine: nil, onSwitch: nil),
             .init(email: "personal@example.com",
                   planLabel: "Max · 5x", isActive: false,
                   bars: [.init(label: "5h", utilization: 96, resetText: Format.compactReset(tonight)),

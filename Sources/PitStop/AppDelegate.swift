@@ -1,5 +1,4 @@
 import AppKit
-import ServiceManagement
 
 /// What the menu bar item shows.
 enum IndicatorStyle: String, CaseIterable {
@@ -105,6 +104,7 @@ struct MenuAccount {
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let menu = NSMenu()
+    private let settingsWindow = SettingsWindowController()
     private var timer: Timer?
     /// One-shot retry scheduled for the earliest backoff expiry, so a
     /// rate-limited account doesn't wait out the rest of a 2-min tick.
@@ -122,6 +122,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var codexLiveEmail: String?
     /// Codex usage, keyed by the codex storage key ("codex:<email>").
     private var codexUsage: [String: Codex.Usage] = [:]
+    /// Recent (time, binding-utilization) samples per account key, for the
+    /// time-to-limit projection. In-memory only; cleared on a window reset.
+    private var usageHistory: [String: [(date: Date, util: Double)]] = [:]
+    /// When PitStop last auto-switched, to avoid flapping.
+    private var lastAutoSwitch: Date?
     /// Last successful report per account — kept on fetch failure so the
     /// display degrades to stale data instead of going blank.
     private var usage: [String: UsageReport] = [:]
@@ -193,6 +198,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // .common so the timer still fires while the menu is open.
         RunLoop.main.add(t, forMode: .common)
         timer = t
+
+        // React to changes made in the Settings window.
+        for key in Settings.observedKeys {
+            UserDefaults.standard.addObserver(self, forKeyPath: key, options: [], context: nil)
+        }
+    }
+
+    nonisolated override func observeValue(forKeyPath keyPath: String?, of object: Any?,
+                                           change: [NSKeyValueChangeKey: Any]?,
+                                           context: UnsafeMutableRawPointer?) {
+        Task { @MainActor [weak self] in self?.applySettings() }
+    }
+
+    /// A preference changed — re-render the menu bar and (closed) menu.
+    private func applySettings() {
+        updateStatusTitle()
+        if isMenuOpen { _ = refreshOpenMenuInPlace() } else { buildMenu() }
     }
 
     // MARK: - Refresh
@@ -257,11 +279,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             await refreshCodexAccount()
 
             lastRefresh = Date()
+            recordUsageSamples()
             updateStatusTitle()
             if !(isMenuOpen && refreshOpenMenuInPlace()) {
                 buildMenu()
             }
             checkThresholds()
+            evaluateAutoSwitch()
             scheduleBackoffRetry()
         }
     }
@@ -498,6 +522,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         ?? NSImage(systemSymbolName: "gauge.with.needle",
                    accessibilityDescription: "Claude Code usage")
 
+    /// What the menu bar item should display this tick.
+    private struct MenuBarReading {
+        var pct: Int?       // nil → "–" (no data)
+        var isStale: Bool
+        var tip: String
+    }
+
     private func updateStatusTitle() {
         guard let button = statusItem.button else { return }
         let style = IndicatorStyle.current
@@ -509,25 +540,50 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         // ink adapts it) and emoji glyphs (which keep their color) survive —
         // so warnings are emoji dots and staleness dims via alphaValue.
         button.contentTintColor = nil
-        let report = activeEmail.flatMap { usage[$0] }
-        guard let email = activeEmail, let report,
-              let utilization = IndicatorMetric.current.utilization(of: report) else {
+        let reading = menuBarReading()
+        button.toolTip = reading.tip
+        guard let pct = reading.pct else {
             button.alphaValue = 1
             button.title = style == .iconOnly ? "" : " –"
-            if let email = activeEmail, let report {
-                button.toolTip = statusTip(email: email, report: report)
-            } else {
-                button.toolTip = activeEmail.flatMap { fetchError[$0] }
-                    ?? "PitStop — no usage data yet"
-            }
             return
         }
-        let pct = Int(utilization.rounded())
-        let isStale = fetchError[email] != nil
-        let dot = isStale ? "" : (pct >= 90 ? "\u{2009}🔴" : (pct >= 75 ? "\u{2009}🟠" : ""))
-        button.alphaValue = isStale ? 0.55 : 1
+        let dot = reading.isStale ? "" : (pct >= 90 ? "\u{2009}🔴" : (pct >= 75 ? "\u{2009}🟠" : ""))
+        button.alphaValue = reading.isStale ? 0.55 : 1
         button.title = (style == .iconOnly ? "" : " \(pct)%") + dot
-        button.toolTip = statusTip(email: email, report: report)
+    }
+
+    /// Pick the account the menu bar tracks, per the `menuBarSource` setting.
+    private func menuBarReading() -> MenuBarReading {
+        switch Settings.menuBarSource {
+        case .activeClaudeCode:
+            guard let email = activeEmail, let report = usage[email] else {
+                let tip = activeEmail.flatMap { fetchError[$0] } ?? "PitStop — no usage data yet"
+                return MenuBarReading(pct: nil, isStale: false, tip: tip)
+            }
+            let util = IndicatorMetric.current.utilization(of: report)
+            return MenuBarReading(pct: util.map { Int($0.rounded()) },
+                                  isStale: fetchError[email] != nil,
+                                  tip: statusTip(email: email, report: report))
+        case .mostUrgent:
+            // Highest binding utilization across every account that has data.
+            var best: (name: String, util: Double, stale: Bool)?
+            func consider(_ key: String, _ name: String, _ util: Double) {
+                if best == nil || util > best!.util {
+                    best = (name, util, fetchError[key] != nil)
+                }
+            }
+            for (key, report) in usage { consider(key, displayEmail(key), report.maxUtilization) }
+            for (key, cu) in codexUsage {
+                let email = String(key.dropFirst("codex:".count))
+                consider(key, "\(displayEmail(email)) (Codex)", cu.maxUtilization)
+            }
+            guard let best else {
+                return MenuBarReading(pct: nil, isStale: false, tip: "PitStop — no usage data yet")
+            }
+            let pct = Int(best.util.rounded())
+            return MenuBarReading(pct: pct, isStale: best.stale,
+                                  tip: "Most used: \(best.name) — \(pct)%")
+        }
     }
 
     private func statusTip(email: String, report: UsageReport) -> String {
@@ -666,44 +722,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
-        let display = NSMenuItem(title: "Menu Bar Display", action: nil, keyEquivalent: "")
-        let displaySub = NSMenu()
-        displaySub.autoenablesItems = false
-        for style in IndicatorStyle.allCases {
-            let item = NSMenuItem(title: style.label,
-                                  action: #selector(setIndicatorStyle(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = style.rawValue
-            item.state = style == .current ? .on : .off
-            displaySub.addItem(item)
-        }
-        displaySub.addItem(.separator())
-        for metric in IndicatorMetric.allCases {
-            let item = NSMenuItem(title: metric.label,
-                                  action: #selector(setIndicatorMetric(_:)), keyEquivalent: "")
-            item.target = self
-            item.representedObject = metric.rawValue
-            item.state = metric == .current ? .on : .off
-            displaySub.addItem(item)
-        }
-        display.submenu = displaySub
-        menu.addItem(display)
-
-        if Bundle.main.bundlePath.hasSuffix(".app") {
-            let login = NSMenuItem(title: "Launch at Login",
-                                   action: #selector(toggleLaunchAtLogin(_:)), keyEquivalent: "")
-            login.target = self
-            login.state = SMAppService.mainApp.status == .enabled ? .on : .off
-            menu.addItem(login)
-        }
+        // All preferences now live in the Settings window.
+        let settings = NSMenuItem(title: "Settings…",
+                                  action: #selector(openSettings(_:)), keyEquivalent: ",")
+        settings.target = self
+        menu.addItem(settings)
 
         // Routed through quitApp rather than terminate: directly — macOS 26
         // auto-assigns an icon to well-known selectors, which adds an image
-        // column to this group and orphans the Launch at Login checkmark.
+        // column to this group and orphans neighboring items.
         let quit = NSMenuItem(title: "Quit PitStop",
                               action: #selector(quitApp(_:)), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
+    }
+
+    @objc private func openSettings(_ sender: Any?) {
+        settingsWindow.show()
     }
 
     /// Assemble the display model for one account row. Bars and extras differ
@@ -715,6 +750,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let bars: [AccountRowView.BarRow]
         var extras: [String] = []
         let dataDate: Date?
+        var bindingUtil: Double?     // for the time-to-limit projection
+        var bindingReset: Date?
 
         if account.isCodex {
             let cu = codexUsage[key]
@@ -723,8 +760,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                       resetText: Format.compactReset($0.resetsAt))
             }
             dataDate = cu?.fetchedAt
+            if let top = cu?.windows.max(by: { $0.usedPercent < $1.usedPercent }) {
+                bindingUtil = top.usedPercent
+                bindingReset = top.resetsAt
+            }
         } else {
             let report = usage[key]
+            bindingUtil = report?.maxUtilization
+            bindingReset = report?.bindingWindow?.resetsAt
             bars = [
                 .init(label: "5h", utilization: report?.fiveHour?.utilization,
                       resetText: Format.compactReset(report?.fiveHour?.resetsAt)),
@@ -771,6 +814,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             status = "Loading…"
         }
 
+        var projection: String?
+        if let util = bindingUtil, fetchError[key] == nil,
+           let full = projectedFull(for: key, current: util, resetsAt: bindingReset) {
+            projection = "↗ on pace to hit limit ~\(Format.updated.string(from: full))"
+        }
+
         let canSwitch = account.canSwitch && !account.isActive
         let isCodex = account.isCodex
         return AccountRowView.Model(
@@ -780,6 +829,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             sourceBadge: account.surfaceTag,
             bars: bars,
             modelsLine: extras.isEmpty ? nil : extras.joined(separator: " · "),
+            projectionLine: projection,
             statusLine: status,
             statusIsInfo: statusIsInfo,
             onSwitch: canSwitch ? { [weak self] in
@@ -813,20 +863,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Actions
 
-    private func performSwitch(to email: String) {
+    private func performSwitch(to email: String, auto: Bool = false, reason: String? = nil) {
         Task {
             do {
                 try await store.switchTo(email: email)
                 activeEmail = email
                 notifiedBucket[email] = nil
                 Notifier.shared.post(
-                    title: "Switched to \(displayEmail(email))",
-                    body: "New Claude Code sessions use this account. Running sessions pick it up on their next token refresh.")
+                    title: auto ? "Auto-switched to \(displayEmail(email))"
+                                : "Switched to \(displayEmail(email))",
+                    body: reason ?? "New Claude Code sessions use this account. Running sessions pick it up on their next token refresh.")
                 refreshAll()
             } catch {
                 showError("Couldn't switch account", error)
             }
         }
+    }
+
+    /// When enabled, flip the live Claude Code account to the saved account with
+    /// the most headroom once the active one crosses the threshold. Claude Code
+    /// only — it's the account the menu bar tracks and the one with a clear
+    /// "active" notion; a cooldown keeps it from flapping.
+    private func evaluateAutoSwitch() {
+        guard Settings.autoSwitchEnabled,
+              let active = activeEmail, let report = usage[active],
+              fetchError[active] == nil else { return }
+        let threshold = Double(Settings.autoSwitchThreshold)
+        guard report.maxUtilization >= threshold else { return }
+        if let last = lastAutoSwitch, Date().timeIntervalSince(last) < 180 { return }
+        // Emptiest saved Claude account that still has real headroom.
+        let target = store.profiles
+            .filter { $0.email != active }
+            .compactMap { p -> (String, Double)? in
+                guard let r = usage[p.email], fetchError[p.email] == nil else { return nil }
+                return (p.email, r.maxUtilization)
+            }
+            .filter { $0.1 < threshold }
+            .min { $0.1 < $1.1 }
+        guard let target else { return }   // nowhere better to go
+        lastAutoSwitch = Date()
+        performSwitch(to: target.0, auto: true, reason:
+            "\(displayEmail(active)) hit \(Int(report.maxUtilization.rounded()))% — "
+            + "moved to \(displayEmail(target.0)) (\(Int(target.1.rounded()))% used).")
+    }
+
+    // MARK: - Usage projection
+
+    /// Append the current binding utilization to each account's history,
+    /// pruned to ~30 min and cleared on a window reset (a drop in utilization).
+    private func recordUsageSamples() {
+        let now = Date()
+        func record(_ key: String, _ util: Double) {
+            var samples = usageHistory[key] ?? []
+            if let last = samples.last, util < last.util - 1 { samples.removeAll() }  // reset
+            samples.append((now, util))
+            samples.removeAll { now.timeIntervalSince($0.date) > 1800 }
+            usageHistory[key] = samples
+        }
+        for (key, report) in usage where fetchError[key] == nil { record(key, report.maxUtilization) }
+        for (key, cu) in codexUsage where fetchError[key] == nil { record(key, cu.maxUtilization) }
+    }
+
+    /// Projected time the binding window hits 100% at the recent pace — only
+    /// when the trend is meaningfully rising, backed by enough data, and the
+    /// limit lands before the window resets. nil otherwise.
+    private func projectedFull(for key: String, current: Double, resetsAt: Date?) -> Date? {
+        guard Settings.showProjection, current < 100,
+              let samples = usageHistory[key], samples.count >= 3,
+              let first = samples.first, let last = samples.last else { return nil }
+        let dt = last.date.timeIntervalSince(first.date)
+        guard dt >= 300 else { return nil }                  // ≥ 5 min of trend
+        let rate = (last.util - first.util) / dt             // % per second
+        guard rate > 0.0005 else { return nil }              // rising > ~0.03 %/min
+        let projected = Date().addingTimeInterval((100 - current) / rate)
+        if let resetsAt, projected >= resetsAt { return nil }  // resets before it fills
+        return projected
     }
 
     /// Switch the live Codex account by swapping `~/.codex/auth.json`.
@@ -886,31 +997,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func quitApp(_ sender: Any?) {
         NSApp.terminate(sender)
-    }
-
-    @objc private func setIndicatorStyle(_ sender: NSMenuItem) {
-        UserDefaults.standard.set(sender.representedObject as? String, forKey: "indicatorStyle")
-        updateStatusTitle()
-        buildMenu()
-    }
-
-    @objc private func setIndicatorMetric(_ sender: NSMenuItem) {
-        UserDefaults.standard.set(sender.representedObject as? String, forKey: "indicatorMetric")
-        updateStatusTitle()
-        buildMenu()
-    }
-
-    @objc private func toggleLaunchAtLogin(_ sender: NSMenuItem) {
-        do {
-            if SMAppService.mainApp.status == .enabled {
-                try SMAppService.mainApp.unregister()
-            } else {
-                try SMAppService.mainApp.register()
-            }
-        } catch {
-            showError("Couldn't change login item", error)
-        }
-        buildMenu()
     }
 
     private func showError(_ title: String, _ error: Error) {

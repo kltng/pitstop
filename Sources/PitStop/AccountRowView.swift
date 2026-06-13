@@ -18,6 +18,7 @@ final class AccountRowView: NSView {
         var sourceBadge: String? = nil  // e.g. "Desktop" — a quiet source tag
         var bars: [BarRow]
         var modelsLine: String?    // "Opus wk 12% · Sonnet wk 10%"
+        var projectionLine: String? = nil  // "↗ on pace to hit limit ~3:40 PM"
         var statusLine: String?    // error / stale / loading info
         var statusIsInfo: Bool = false  // muted (neutral) vs orange (warning)
         var onSwitch: (() -> Void)?  // nil = active (not clickable)
@@ -40,6 +41,7 @@ final class AccountRowView: NSView {
     static func height(for model: Model) -> CGFloat {
         var height: CGFloat = 29 + CGFloat(model.bars.count) * 16 + 6
         if model.modelsLine != nil { height += 15 }
+        if model.projectionLine != nil { height += 15 }
         if model.statusLine != nil { height += 15 }
         return height
     }
@@ -206,6 +208,14 @@ final class AccountRowView: NSView {
             line.draw(at: NSPoint(x: barX, y: y + 1),
                       withAttributes: [.font: NSFont.systemFont(ofSize: 10.5),
                                        .foregroundColor: NSColor.secondaryLabelColor])
+            y += 15
+        }
+
+        // Time-to-limit projection — coral accent, a soft "trending up" heads-up.
+        if let proj = model.projectionLine {
+            proj.draw(at: NSPoint(x: barX, y: y + 1),
+                      withAttributes: [.font: NSFont.systemFont(ofSize: 10.5, weight: .medium),
+                                       .foregroundColor: coral])
             y += 15
         }
 

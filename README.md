@@ -92,15 +92,26 @@ Or set it up manually:
   retrying as soon as the backoff window expires; the last good numbers
   stay visible (rows note "showing … data"; the menu bar dims) during
   outages.
-- **Menu bar number** is the active Claude Code account's binding constraint —
-  `max(5-hour, weekly)` utilization, with a warning dot from 75 % (🟠)
-  and 90 % (🔴). (Dots rather than colored text: macOS repaints menu
-  bar items in a single wallpaper-matched ink, and emoji are the only
-  glyphs that keep their color.) The **Menu Bar Display** submenu
-  customizes it: icon & percent / icon only / percent only, and which
-  limit drives the number (highest / 5-hour / weekly).
+- **Menu bar number** is, by default, the active Claude Code account's
+  binding constraint — `max(5-hour, weekly)` utilization — with a warning dot
+  from 75 % (🟠) and 90 % (🔴). (Dots rather than colored text: macOS repaints
+  menu bar items in a single wallpaper-matched ink, and emoji are the only
+  glyphs that keep their color.) **Settings** customizes it: what it shows
+  (icon & percent / icon only / percent only), which account it tracks (the
+  active Claude Code account, or the most-used account across any provider),
+  and which limit drives the number (highest / 5-hour / weekly).
+- **Auto-switch** (off by default) flips the live Claude Code account to the
+  saved account with the most headroom once the active one crosses a
+  configurable threshold, and notifies you. A cooldown prevents flapping;
+  Codex and Desktop are left alone.
+- **Time-to-limit projection** (on by default) samples usage over time and,
+  when a window is trending toward full *before* it resets, shows
+  "↗ on pace to hit limit ~3:40 PM" on the row.
 - **Notifications** fire when the active account crosses 80 % and 95 %,
   with the reset time, so you can switch before sessions stall.
+- **Settings** (⌘, from the menu) is a small window holding all preferences —
+  the menu-bar options above, auto-switch, the projection toggle, and launch
+  at login.
 - **Accounts** are snapshots of the Claude Code credential blob:
   - secrets live in the **keychain** (service `PitStop-profile`, one item
     per account email) — never written to disk;

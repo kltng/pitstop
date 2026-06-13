@@ -13,22 +13,26 @@ work keeps going.
   <img src="docs/menu.png" width="465" alt="PitStop menu: two accounts with color-coded usage bars">
 </p>
 
-The coral dot marks the active account; hovering an inactive row flips its
-plan chip into a coral **Switch** pill — click to switch. Rows are sorted
-active-first, then by headroom (the emptiest account next — the one you'd
-switch to). The menu bar shows the active account's binding limit,
-color-coded.
+Accounts are grouped into a section per provider — **Claude**, **Codex**, and
+whatever comes next. Within each section the live account is marked with a
+coral dot and listed first, then the rest by headroom (emptiest next — the one
+you'd switch to). Hovering a switchable row flips its plan chip into a coral
+**Switch** pill. A small tag on each row names the surface — **Code**,
+**Desktop**, or **Code · Desktop** — so you can tell a switchable CLI account
+from a read-only Desktop one at a glance. The menu bar shows the active Claude
+Code account's binding limit, color-coded.
 
-If you also use the **Claude Desktop** app signed into a *different* account,
-that account shows up too — tagged **Desktop**, read-only (PitStop can watch
-its usage but can't switch it). One account signed into both Claude Code and
-Claude Desktop is a single shared usage pool, so it stays a single row.
+What shows up where:
 
-**OpenAI Codex** appears tagged **Codex**, and you can **switch** Codex
-accounts too — its login lives in `~/.codex/auth.json` (shared by the Codex
-CLI and the Codex app), which PitStop snapshots per account and swaps the same
-way it swaps the Claude Code credential. Each plan's rate-limit windows render
-as bars just like Claude's 5-hour and weekly limits.
+- **Claude Code** accounts are switchable. **Claude Desktop** (a *different*
+  login) shows read-only, tagged **Desktop**; an account signed into both Code
+  and Desktop is one shared usage pool, so it stays a single row tagged
+  **Code · Desktop**.
+- **OpenAI Codex** accounts are switchable too — its login lives in
+  `~/.codex/auth.json` (shared by the Codex CLI and the Codex app), which
+  PitStop snapshots per account and swaps the same way it swaps the Claude
+  Code credential. Each plan's rate-limit windows render as bars just like
+  Claude's 5-hour and weekly limits.
 
 ## Quickstart
 

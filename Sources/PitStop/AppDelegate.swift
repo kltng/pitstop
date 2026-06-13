@@ -49,6 +49,18 @@ enum IndicatorMetric: String, CaseIterable {
     }
 }
 
+/// A usage provider — the menu groups accounts under one section per provider.
+/// Add a case (and its title) to extend PitStop to another service.
+enum Provider: CaseIterable {
+    case claude, codex
+    var title: String {
+        switch self {
+        case .claude: return "Claude"
+        case .codex: return "Codex"
+        }
+    }
+}
+
 /// One row in the menu. Within a provider, accounts merge by email — the same
 /// Claude account signed into both Claude Code and Claude Desktop is one shared
 /// usage pool, so one row. Across providers they don't: a Claude and a Codex
@@ -62,6 +74,7 @@ struct MenuAccount {
     var isActive: Bool
 
     var isCodex: Bool { source == .codex }
+    var provider: Provider { isCodex ? .codex : .claude }
     /// Switchable providers: Claude Code (owns the live credential keychain
     /// item) and Codex (owns ~/.codex/auth.json). Desktop is observe-only — its
     /// login lives in that app. The live account of each is filtered out by the
@@ -75,11 +88,15 @@ struct MenuAccount {
     /// Storage key for usage/error/backoff dicts — namespaced by provider so a
     /// Claude and a Codex account with the same email don't collide.
     var key: String { isCodex ? "codex:\(email)" : email }
-    var sourceBadge: String? {
+    /// Which surface within the provider — shown as a small tag, since the
+    /// provider itself is now the section header. Codex has one surface (the
+    /// CLI and app share a login), so it needs none.
+    var surfaceTag: String? {
         switch source {
-        case .code: return nil
-        case .desktop, .both: return "Desktop"
-        case .codex: return "Codex"
+        case .code: return "Code"
+        case .both: return "Code · Desktop"   // switchable, and the Desktop login
+        case .desktop: return "Desktop"
+        case .codex: return nil
         }
     }
 }
@@ -416,7 +433,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// rebuild on close re-sorts. Returns false when the row set or row
     /// heights changed — the caller falls back to a full rebuild.
     private func refreshOpenMenuInPlace() -> Bool {
-        let sorted = sortedAccounts()
+        let sorted = orderedAccounts()
         guard sorted.count == accountRows.count else { return false }
         let models = sorted.map(rowModel(for:))
         // Keyed by the account's storage key, not its display email (which may
@@ -556,23 +573,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return usage[account.key]?.maxUtilization ?? 999
     }
 
-    /// Section header naming whichever providers are present.
-    private func usageHeaderTitle() -> String {
-        let hasClaude = !store.profiles.isEmpty || desktopAccount != nil
-        let claudeLabel = desktopAccount == nil ? "Claude Code" : "Claude"
-        switch (hasClaude, !codexStore.profiles.isEmpty) {
-        case (true, true): return "\(claudeLabel) & Codex Usage"
-        case (false, true): return "Codex Usage"
-        default: return "\(claudeLabel) Usage"
+    /// Accounts grouped into one section per provider, in `Provider.allCases`
+    /// order; within a section, live account first, then by headroom (emptiest
+    /// next). Empty providers are dropped.
+    private func groupedAccounts() -> [(provider: Provider, accounts: [MenuAccount])] {
+        let all = accountsForMenu()
+        return Provider.allCases.compactMap { provider in
+            let accounts = all
+                .filter { $0.provider == provider }
+                .sorted { a, b in
+                    if a.isActive != b.isActive { return a.isActive }
+                    return headroom(a) < headroom(b)
+                }
+            return accounts.isEmpty ? nil : (provider, accounts)
         }
     }
 
-    /// Active account first, then by headroom (emptiest next).
-    private func sortedAccounts() -> [MenuAccount] {
-        accountsForMenu().sorted { a, b in
-            if a.isActive != b.isActive { return a.isActive }
-            return headroom(a) < headroom(b)
-        }
+    /// The rows in display order, flattened across provider groups — for the
+    /// in-place refresh, which must line up 1:1 with `accountRows`.
+    private func orderedAccounts() -> [MenuAccount] {
+        groupedAccounts().flatMap(\.accounts)
     }
 
     private func buildMenu() {
@@ -580,19 +600,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         accountRows = []
         updatedItem = nil
 
-        let accounts = sortedAccounts()
-        menu.addItem(NSMenuItem.sectionHeader(title: usageHeaderTitle()))
-
-        if accounts.isEmpty {
+        let groups = groupedAccounts()
+        if groups.isEmpty {
+            menu.addItem(NSMenuItem.sectionHeader(title: "Usage"))
             addDisabled("No accounts found — log in with `claude` first")
         }
-
-        for account in accounts {
-            let item = NSMenuItem()
-            let view = AccountRowView(model: rowModel(for: account))
-            item.view = view
-            menu.addItem(item)
-            accountRows.append((account.key, view))
+        // One section per provider; rows in each carry a surface tag (Code /
+        // Desktop) since the provider name is now the header.
+        for group in groups {
+            menu.addItem(NSMenuItem.sectionHeader(title: group.provider.title))
+            for account in group.accounts {
+                let item = NSMenuItem()
+                let view = AccountRowView(model: rowModel(for: account))
+                item.view = view
+                menu.addItem(item)
+                accountRows.append((account.key, view))
+            }
         }
 
         menu.addItem(.separator())
@@ -754,7 +777,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             email: displayEmail(email),
             planLabel: account.planLabel,
             isActive: account.isActive,
-            sourceBadge: account.sourceBadge,
+            sourceBadge: account.surfaceTag,
             bars: bars,
             modelsLine: extras.isEmpty ? nil : extras.joined(separator: " · "),
             statusLine: status,

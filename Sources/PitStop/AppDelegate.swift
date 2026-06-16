@@ -348,19 +348,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Discover the Claude Desktop account and fetch its usage. Best-effort:
     /// a missing/not-signed-in Desktop just clears the account; a fetch error
-    /// keeps the last-known identity and shows the error on its row. Skipped
-    /// entirely if PitStop already tracks that email as a Code profile (same
-    /// account, same shared usage — the Code path already fetched it).
+    /// keeps the last-known identity and shows the error on its row.
+    ///
+    /// For an account that's *also* a saved Code profile, the Code (OAuth) path
+    /// is the usual usage source — but if that fetch failed this cycle (e.g. a
+    /// rejected token), fall back to the healthy Desktop session here instead of
+    /// discarding it and leaving the Code error on the merged row.
     private func refreshDesktopAccount() async {
         let knownEmail = desktopAccount?.email
-        guard knownEmail.map(passedBackoffGate) ?? true else { return }
+        // Normally skip while the email's backoff is active — except when a
+        // same-email Code profile errored this cycle: that backoff is the Code
+        // failure's, and Desktop is a separate session worth trying as a fallback
+        // (its own state is shared on this key, so the shared backoff is Code's).
+        let codeErrored = knownEmail.map { email in
+            store.profiles.contains(where: { $0.email == email }) && fetchError[email] != nil
+        } ?? false
+        guard codeErrored || (knownEmail.map(passedBackoffGate) ?? true) else { return }
         do {
             guard let (account, report) = try await ClaudeDesktop.poll() else {
                 desktopAccount = nil
                 return
             }
             desktopAccount = account
-            if !store.profiles.contains(where: { $0.email == account.email }) {
+            // Record Desktop usage when no Code profile covers this email, or
+            // when one does but its Code fetch failed this cycle — fall back to
+            // the (healthy) Desktop session rather than showing the Code error.
+            if !store.profiles.contains(where: { $0.email == account.email })
+                || fetchError[account.email] != nil {
                 recordFetchSuccess(report, for: account.email)
             }
         } catch {

@@ -140,6 +140,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var failureCount: [String: Int] = [:]
     private var lastRefresh: Date?
     private var lastTopLevelError: String?
+    /// A newer GitHub release than the running build, if one was found.
+    private var updateInfo: Updater.UpdateInfo?
+    /// When the GitHub Releases check last ran (throttled to once a day).
+    private var lastUpdateCheck: Date?
     private var refreshing = false
     /// An explicit Refresh Now arrived while a refresh was in flight.
     private var refreshQueued = false
@@ -287,6 +291,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             checkThresholds()
             evaluateAutoSwitch()
             scheduleBackoffRetry()
+            checkForUpdatesIfDue()
+        }
+    }
+
+    /// Check GitHub Releases at most once a day; reflect the result in the menu.
+    private func checkForUpdatesIfDue() {
+        if let last = lastUpdateCheck, Date().timeIntervalSince(last) < 86400 { return }
+        lastUpdateCheck = Date()
+        Task { @MainActor in
+            let info = await Updater.checkForUpdate()
+            guard info != updateInfo else { return }
+            updateInfo = info
+            if isMenuOpen { menuNeedsRebuildOnClose = true } else { buildMenu() }
         }
     }
 
@@ -736,6 +753,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         menu.addItem(.separator())
 
+        if let updateInfo {
+            let title = updateInfo.canRebuild
+                ? "↑ Update to v\(updateInfo.version) & Relaunch"
+                : "↑ Update available — v\(updateInfo.version)"
+            let item = NSMenuItem(title: title, action: #selector(updateAction(_:)), keyEquivalent: "")
+            item.target = self
+            menu.addItem(item)
+        }
+        addDetail("PitStop v\(AppVersion.current)")
+
         // All preferences now live in the Settings window.
         let settings = NSMenuItem(title: "Settings…",
                                   action: #selector(openSettings(_:)), keyEquivalent: ",")
@@ -753,6 +780,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func openSettings(_ sender: Any?) {
         settingsWindow.show()
+    }
+
+    @objc private func updateAction(_ sender: Any?) {
+        guard let info = updateInfo else { return }
+        guard info.canRebuild else {
+            NSWorkspace.shared.open(info.url)   // no source checkout — open the release
+            return
+        }
+        let alert = NSAlert()
+        alert.messageText = "Update to v\(info.version)?"
+        alert.informativeText = "PitStop will pull the latest source, rebuild, and relaunch. This takes a few seconds."
+        alert.addButton(withTitle: "Update & Relaunch")
+        alert.addButton(withTitle: "View Release")
+        alert.addButton(withTitle: "Cancel")
+        NSApp.activate(ignoringOtherApps: true)
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: performSourceUpdate()
+        case .alertSecondButtonReturn: NSWorkspace.shared.open(info.url)
+        default: break
+        }
+    }
+
+    /// Pull + rebuild + relaunch in place. Surfaces the failing step's output
+    /// and stays running if anything goes wrong (no half-applied relaunch).
+    private func performSourceUpdate() {
+        Notifier.shared.post(title: "Updating PitStop…",
+                             body: "Pulling and rebuilding from source — it'll relaunch when done.")
+        Task { @MainActor in
+            do {
+                try await Updater.rebuildFromSource()
+                Updater.relaunch()
+            } catch {
+                showError("Update failed", error)
+            }
+        }
     }
 
     /// Assemble the display model for one account row. Bars and extras differ

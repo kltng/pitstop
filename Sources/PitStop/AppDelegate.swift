@@ -1112,8 +1112,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 Notifier.shared.post(title: "Signed in to \(displayEmail(email))",
                                      body: "Fresh credentials saved. This account is switchable again.")
                 refreshAll()
+            } catch LoginError.cancelled {
+                // user backed out of the paste window — no message
             } catch is CancellationError {
-                // user cancelled — no message
+                // task cancelled — no message
             } catch {
                 showError("Couldn't sign in", error)
             }

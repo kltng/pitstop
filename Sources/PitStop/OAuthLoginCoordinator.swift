@@ -10,8 +10,9 @@ final class OAuthLoginCoordinator {
         var loopbackTimeout: TimeInterval = 120
     }
 
-    /// Identity match: Codex prefers the stable account id; otherwise email
-    /// (case- and whitespace-insensitive).
+    /// Identity match against the row's email (case- and whitespace-insensitive).
+    /// Email is unique per account, so this is sufficient; `LoginIdentity.accountID`
+    /// is carried for diagnostics/future use but not required for the match.
     static func emailMatches(expected: String, _ identity: LoginIdentity) -> Bool {
         func norm(_ s: String) -> String {
             s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()

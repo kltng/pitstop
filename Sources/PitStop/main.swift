@@ -184,6 +184,19 @@ if CommandLine.arguments.contains("--preview") {
     exit(0)
 }
 
+// Refuse to run alongside another PitStop (e.g. installed app + `swift run`
+// binary): two instances would fight over the live credential files. flock
+// releases automatically if the process dies, so a stale lock can't wedge
+// future launches. The fd intentionally stays open for the app's lifetime.
+try? FileManager.default.createDirectory(at: ProfileStore.directory,
+                                         withIntermediateDirectories: true)
+let lockFD = open(ProfileStore.directory.appendingPathComponent("pitstop.lock").path,
+                  O_CREAT | O_RDWR, 0o600)
+if lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) != 0 {
+    NSLog("PitStop: another instance is already running — exiting.")
+    exit(0)
+}
+
 MainActor.assumeIsolated {
     let app = NSApplication.shared
     let delegate = AppDelegate()

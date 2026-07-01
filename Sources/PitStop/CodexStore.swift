@@ -138,7 +138,7 @@ final class CodexStore {
     /// Write a blob into the live `auth.json`, preserving its `600` mode (it
     /// holds secrets). Atomic so a crash can't leave a half-written file.
     private func writeLive(_ blob: Data) throws {
-        try blob.write(to: Codex.authURL, options: .atomic)
+        try AtomicFile.write(blob, to: Codex.authURL)
         try FileManager.default.setAttributes([.posixPermissions: 0o600],
                                               ofItemAtPath: Codex.authURL.path)
     }

@@ -85,6 +85,6 @@ enum ClaudeConfig {
         }
         root["oauthAccount"] = account
         let out = try JSONSerialization.data(withJSONObject: root)
-        try out.write(to: url, options: .atomic)
+        try AtomicFile.write(out, to: url)
     }
 }

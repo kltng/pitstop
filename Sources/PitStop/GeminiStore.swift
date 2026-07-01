@@ -219,7 +219,7 @@ final class GeminiStore {
 
     /// Write the CLI blob into ~/.gemini/oauth_creds.json (mode 600).
     private func writeCliLive(_ blob: Data) throws {
-        try blob.write(to: Self.cliCredsURL, options: .atomic)
+        try AtomicFile.write(blob, to: Self.cliCredsURL)
         try FileManager.default.setAttributes([.posixPermissions: 0o600],
                                               ofItemAtPath: Self.cliCredsURL.path)
     }
@@ -236,7 +236,6 @@ final class GeminiStore {
         if let prev = root["active"] as? String, prev != email, !old.contains(prev) { old.append(prev) }
         root["active"] = email
         root["old"] = old.filter { $0 != email }
-        try JSONSerialization.data(withJSONObject: root)
-            .write(to: url, options: .atomic)
+        try AtomicFile.write(JSONSerialization.data(withJSONObject: root), to: url)
     }
 }

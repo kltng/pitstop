@@ -1,4 +1,5 @@
 import AppKit
+import Combine
 import ServiceManagement
 import SwiftUI
 
@@ -54,17 +55,30 @@ struct SettingsView: View {
 }
 
 /// Launch-at-login lives in `SMAppService`, not UserDefaults, so it gets its
-/// own toggle that registers/unregisters the login item.
+/// own toggle that registers/unregisters the login item. Status is re-read
+/// whenever the (cached, long-lived) settings window comes forward, so
+/// changes made in System Settings show up; a pending-approval state gets an
+/// explanation instead of looking like a silent failure.
 private struct LaunchAtLoginToggle: View {
-    @State private var on = SMAppService.mainApp.status == .enabled
+    @State private var status = SMAppService.mainApp.status
 
     var body: some View {
-        Toggle("Launch at login", isOn: Binding(
-            get: { on },
-            set: { want in
-                try? want ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
-                on = SMAppService.mainApp.status == .enabled
-            }))
+        VStack(alignment: .leading, spacing: 4) {
+            Toggle("Launch at login", isOn: Binding(
+                get: { status == .enabled },
+                set: { want in
+                    try? want ? SMAppService.mainApp.register() : SMAppService.mainApp.unregister()
+                    status = SMAppService.mainApp.status
+                }))
+            if status == .requiresApproval {
+                Text("Waiting for approval — enable PitStop under System Settings → General → Login Items.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(
+            for: NSWindow.didBecomeKeyNotification)) { _ in
+            status = SMAppService.mainApp.status
+        }
     }
 }
 

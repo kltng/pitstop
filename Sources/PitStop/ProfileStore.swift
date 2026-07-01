@@ -142,8 +142,19 @@ final class ProfileStore {
         guard let blob = try await Keychain.read(service: CredentialBlob.profileService, account: email) else {
             throw StoreError(message: "No saved credentials for \(email) — log in once with `claude` and save again")
         }
+        let previousLive = try await Keychain.read(service: CredentialBlob.liveService)
         try await Keychain.upsertLive(service: CredentialBlob.liveService, data: blob)
-        try ClaudeConfig.setOauthAccount(profile.oauthAccount)
+        do {
+            try ClaudeConfig.setOauthAccount(profile.oauthAccount)
+        } catch {
+            // Roll the live item back so the keychain and ~/.claude.json can't
+            // disagree — a mismatched pair makes the next captureCurrent file
+            // the new account's tokens under the old account's profile.
+            if let previousLive {
+                try? await Keychain.upsertLive(service: CredentialBlob.liveService, data: previousLive)
+            }
+            throw error
+        }
     }
 
     func remove(email: String) async throws {

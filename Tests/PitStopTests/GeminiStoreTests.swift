@@ -39,6 +39,26 @@ final class GeminiStoreTests: XCTestCase {
         XCTAssertEqual(Gemini.normalizedBlob(Data("x".utf8)), Data("x".utf8))
     }
 
+    func testUpdateGoogleAccountsSetsActiveAndRotatesOld() throws {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pitstop-test-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let url = dir.appendingPathComponent("google_accounts.json")
+
+        // Missing file: creates it with the active email.
+        try GeminiStore.updateGoogleAccounts(at: url, active: "a@x.com")
+        var root = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        XCTAssertEqual(root["active"] as? String, "a@x.com")
+
+        // Switching moves the previous active into "old" and dedupes.
+        try GeminiStore.updateGoogleAccounts(at: url, active: "b@x.com")
+        try GeminiStore.updateGoogleAccounts(at: url, active: "a@x.com")
+        root = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as! [String: Any]
+        XCTAssertEqual(root["active"] as? String, "a@x.com")
+        XCTAssertEqual(root["old"] as? [String], ["b@x.com"])
+    }
+
     func testServicesAndPaths() {
         XCTAssertEqual(GeminiStore.cliService, "PitStop-gemini-cli")
         XCTAssertEqual(GeminiStore.antigravityService, "PitStop-gemini-antigravity")

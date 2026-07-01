@@ -168,7 +168,7 @@ final class GeminiStore {
         _ = try await captureCurrent()
         var wrote = false
         if let cli = try await Keychain.read(service: Self.cliService, account: email) {
-            try writeCliLive(cli, email: email); wrote = true
+            try writeCliLive(cli); wrote = true
         }
         if let ag = try await Keychain.read(service: Self.antigravityService, account: email) {
             try await Keychain.upsertLive(service: Self.liveKeychainService, account: Self.liveKeychainAccount, data: ag); wrote = true
@@ -176,6 +176,10 @@ final class GeminiStore {
         guard wrote else {
             throw StoreError(message: "No saved Gemini credentials for \(email) — sign in once and save again")
         }
+        // Both surfaces read their identity from the shared active Google
+        // account, so update it for an Antigravity-only switch too — otherwise
+        // the next captureCurrent files the new live AG token under the old email.
+        try Self.updateGoogleAccounts(at: Self.googleAccountsURL, active: email)
     }
 
     /// The blob to fetch usage with for a surface — live for the active account,
@@ -204,14 +208,18 @@ final class GeminiStore {
         try save()
     }
 
-    /// Write the CLI blob into ~/.gemini/oauth_creds.json (mode 600) and set the
-    /// active email in google_accounts.json.
-    private func writeCliLive(_ blob: Data, email: String) throws {
+    /// Write the CLI blob into ~/.gemini/oauth_creds.json (mode 600).
+    private func writeCliLive(_ blob: Data) throws {
         try blob.write(to: Self.cliCredsURL, options: .atomic)
         try FileManager.default.setAttributes([.posixPermissions: 0o600],
                                               ofItemAtPath: Self.cliCredsURL.path)
+    }
+
+    /// Set the active email in google_accounts.json, rotating the previous
+    /// active into "old" (matching gemini-cli's own bookkeeping).
+    static func updateGoogleAccounts(at url: URL, active email: String) throws {
         var root: [String: Any] = [:]
-        if let data = try? Data(contentsOf: Self.googleAccountsURL),
+        if let data = try? Data(contentsOf: url),
            let existing = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             root = existing
         }
@@ -220,6 +228,6 @@ final class GeminiStore {
         root["active"] = email
         root["old"] = old.filter { $0 != email }
         try JSONSerialization.data(withJSONObject: root)
-            .write(to: Self.googleAccountsURL, options: .atomic)
+            .write(to: url, options: .atomic)
     }
 }

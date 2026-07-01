@@ -824,6 +824,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         removable += codexStore.profiles
             .filter { $0.email != codexLiveEmail }
             .map { ("\(displayEmail($0.email)) · Codex", "codex:\($0.email)") }
+        removable += geminiStore.profiles
+            .filter { $0.email != geminiLiveCliEmail && $0.email != geminiLiveAntigravityEmail }
+            .map { ("\(displayEmail($0.email)) · Gemini", "gemini:\($0.email)") }
         if !removable.isEmpty {
             let removeRoot = NSMenuItem(title: "Remove Account", action: nil, keyEquivalent: "")
             let sub = NSMenu()
@@ -1015,6 +1018,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         let canSwitch = account.canSwitch && !account.isActive
         let isCodex = account.isCodex
+        let isGemini = account.isGemini
         let offerLogin = shouldOfferLogin(for: account)
         return AccountRowView.Model(
             email: displayEmail(email),
@@ -1027,7 +1031,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             statusLine: status,
             statusIsInfo: statusIsInfo,
             onSwitch: (canSwitch && !offerLogin) ? { [weak self] in
-                if isCodex { self?.performCodexSwitch(to: email) }
+                if isGemini { self?.performGeminiSwitch(to: email) }
+                else if isCodex { self?.performCodexSwitch(to: email) }
                 else { self?.performSwitch(to: email) }
             } : nil,
             onLogin: offerLogin ? { [weak self] in self?.performLogin(account) } : nil)
@@ -1091,6 +1096,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                        return fetchError[key] == nil ? codexUsage[key]?.maxUtilization : nil
                    },
                    perform: { performCodexSwitch(to: $0, auto: true, reason: $1) })
+        autoSwitch(provider: .gemini, live: geminiLiveCliEmail,
+                   candidates: geminiStore.profiles.map(\.email),
+                   utilization: {
+                       let key = "gemini:\($0)"
+                       return fetchError[key] == nil ? geminiUsage[key]?.maxUtilization : nil
+                   },
+                   perform: { performGeminiSwitch(to: $0, auto: true, reason: $1) })
     }
 
     /// Switch `live` to the emptiest candidate below the threshold when it's
@@ -1260,6 +1272,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Switch the live Gemini account by swapping BOTH surfaces (CLI file +
+    /// Antigravity keychain) to `email`.
+    private func performGeminiSwitch(to email: String, auto: Bool = false, reason: String? = nil) {
+        Task {
+            do {
+                try await geminiStore.switchTo(email: email)
+                geminiLiveCliEmail = geminiStore.liveCliEmail()
+                geminiLiveAntigravityEmail = await geminiStore.liveAntigravityEmail()
+                Notifier.shared.post(
+                    title: auto ? "Auto-switched Gemini to \(displayEmail(email))"
+                                : "Switched Gemini to \(displayEmail(email))",
+                    body: reason ?? "Quit & reopen Gemini CLI / Antigravity to pick it up. (Rotating accounts may violate Antigravity's terms.)")
+                refreshAll()
+            } catch { showError("Couldn't switch Gemini account", error) }
+        }
+    }
+
     @objc private func saveCurrent(_ sender: Any?) {
         Task {
             do {
@@ -1281,7 +1310,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let key = sender.representedObject as? String else { return }
         Task {
             do {
-                if key.hasPrefix("codex:") {
+                if key.hasPrefix("gemini:") {
+                    let email = String(key.dropFirst("gemini:".count))
+                    try await geminiStore.remove(email: email)
+                    geminiUsage[key] = nil
+                } else if key.hasPrefix("codex:") {
                     let email = String(key.dropFirst("codex:".count))
                     try await codexStore.remove(email: email)
                     codexUsage[key] = nil

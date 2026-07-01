@@ -325,6 +325,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             lastRefresh = Date()
             recordUsageSamples()
+            pruneOrphanedState()
             updateStatusTitle()
             if !(isMenuOpen && refreshOpenMenuInPlace()) {
                 buildMenu()
@@ -1369,6 +1370,29 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Drop per-account state whose account no longer exists. Without this, a
+    /// signed-out Desktop account keeps feeding the most-urgent menu bar
+    /// reading, and an account removed mid-refresh gets resurrected by the
+    /// in-flight cycle's recordFetch* calls.
+    private func pruneOrphanedState() {
+        var valid = Set(store.profiles.map(\.email))
+        if let d = desktopAccount { valid.insert(d.email) }
+        for c in codexStore.profiles { valid.insert("codex:\(c.email)") }
+        for g in geminiStore.profiles { valid.insert("gemini:\(g.email)") }
+        usage = usage.filter { valid.contains($0.key) }
+        codexUsage = codexUsage.filter { valid.contains($0.key) }
+        geminiUsage = geminiUsage.filter { valid.contains($0.key) }
+        fetchError = fetchError.filter { valid.contains($0.key) }
+        nextFetchAllowed = nextFetchAllowed.filter { valid.contains($0.key) }
+        failureCount = failureCount.filter { valid.contains($0.key) }
+        needsAction = needsAction.filter { valid.contains($0) }
+        notifiedBucket = notifiedBucket.filter { valid.contains($0.key) }
+        geminiProject = geminiProject.filter { valid.contains("gemini:\($0.key)") }
+        usageHistory = usageHistory.filter { entry in
+            valid.contains(where: { entry.key.hasPrefix("\($0)#") })
+        }
+    }
+
     @objc private func removeAccount(_ sender: NSMenuItem) {
         guard let key = sender.representedObject as? String else { return }
         Task {
@@ -1377,6 +1401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     let email = String(key.dropFirst("gemini:".count))
                     try await geminiStore.remove(email: email)
                     geminiUsage[key] = nil
+                    geminiProject[email] = nil
                 } else if key.hasPrefix("codex:") {
                     let email = String(key.dropFirst("codex:".count))
                     try await codexStore.remove(email: email)
@@ -1388,6 +1413,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 fetchError[key] = nil
                 nextFetchAllowed[key] = nil
                 failureCount[key] = nil
+                needsAction.remove(key)
+                notifiedBucket[key] = nil
                 usageHistory = usageHistory.filter { !$0.key.hasPrefix("\(key)#") }
                 buildMenu()
             } catch {

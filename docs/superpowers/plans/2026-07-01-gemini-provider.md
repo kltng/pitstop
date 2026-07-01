@@ -1184,6 +1184,8 @@ In `rowModel(for:)`, add a gemini branch for the bars/extras. In the `if account
 
 Note: the existing code uses `var extras: [String] = []` then `modelsLine: extras.isEmpty ? nil : extras.joined(...)`. Reuse that `extras` array — append the gemini extras line to it (rename the local above from `extrasLines` to the existing `extras`). Keep `modelsLine` wiring unchanged.
 
+Extend `recordFetchError`'s needs-action switch arm to include Gemini so an expired inactive account gets `needsAction` + the 1-hour backoff (Login pill + no retry spam), matching Codex. Change the case list `UsageAPI.APIError.unauthorized, ClaudeDesktop.DesktopError.sessionExpired, Codex.CodexError.sessionExpired:` to also list `Gemini.GeminiError.sessionExpired,`.
+
 Extend `menuBarReading()` `mostUrgent` to include gemini (after the codex loop):
 
 ```swift

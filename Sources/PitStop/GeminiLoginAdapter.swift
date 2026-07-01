@@ -64,7 +64,10 @@ extension GeminiLoginAdapter {
     }
 
     func persist(_ tokens: FreshTokens, email: String) async throws {
-        let blob = try buildBlob(old: Data(), tokens: tokens)
+        // Patch the saved blob when one exists — Google may omit refresh_token
+        // on re-auth, and rebuilding from scratch would destroy the stored one.
+        let old = (try? await Keychain.read(service: profileService, account: email)) ?? Data()
+        let blob = try buildBlob(old: old, tokens: tokens)
         try await Keychain.upsert(service: profileService, account: email, data: blob)
     }
 }
@@ -74,8 +77,20 @@ struct GeminiCliLoginAdapter: GeminiLoginAdapter {
     var surface: Gemini.Surface { .cli }
     var profileService: String { GeminiStore.cliService }
     func buildBlob(old: Data, tokens: FreshTokens) throws -> Data {
-        GeminiStore.buildCliBlob(access: tokens.accessToken, refresh: tokens.refreshToken,
-                                 idToken: tokens.idToken, expiryMs: tokens.expiresAtMs ?? 0)
+        // Patch the old blob when it parses (preserves refresh_token and any
+        // keys the CLI added); build from scratch only when there's nothing.
+        let expiryMs = tokens.expiresAtMs ?? 0
+        if var obj = try? JSONSerialization.jsonObject(with: old) as? [String: Any] {
+            obj["access_token"] = tokens.accessToken
+            obj["expiry_date"] = expiryMs
+            if let r = tokens.refreshToken { obj["refresh_token"] = r }
+            if let id = tokens.idToken { obj["id_token"] = id }
+            if let data = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) {
+                return data
+            }
+        }
+        return GeminiStore.buildCliBlob(access: tokens.accessToken, refresh: tokens.refreshToken,
+                                        idToken: tokens.idToken, expiryMs: expiryMs)
     }
 }
 
@@ -85,6 +100,21 @@ struct GeminiAntigravityLoginAdapter: GeminiLoginAdapter {
     var profileService: String { GeminiStore.antigravityService }
     func buildBlob(old: Data, tokens: FreshTokens) throws -> Data {
         let iso = Gemini.iso8601.string(from: Date(timeIntervalSince1970: (tokens.expiresAtMs ?? 0) / 1000))
+        // Patch the old blob when it parses (preserves refresh_token and any
+        // sibling keys); build from scratch only when there's nothing.
+        if let raw = String(data: old, encoding: .utf8),
+           let inner = Gemini.decodeGoKeyring(raw),
+           var obj = try? JSONSerialization.jsonObject(with: inner) as? [String: Any],
+           var tok = obj["token"] as? [String: Any] {
+            tok["access_token"] = tokens.accessToken
+            tok["expiry"] = iso
+            if let r = tokens.refreshToken { tok["refresh_token"] = r }
+            if let id = tokens.idToken { tok["id_token"] = id }
+            obj["token"] = tok
+            if let re = try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys]) {
+                return Data(Gemini.encodeGoKeyring(re).utf8)
+            }
+        }
         return GeminiStore.buildAntigravityBlob(access: tokens.accessToken, refresh: tokens.refreshToken,
                                                 idToken: tokens.idToken, expiryISO: iso)
     }

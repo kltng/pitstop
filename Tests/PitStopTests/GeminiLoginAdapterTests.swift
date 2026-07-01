@@ -33,4 +33,31 @@ final class GeminiLoginAdapterTests: XCTestCase {
         XCTAssertEqual(q["client_id"], Gemini.antigravityClient.id)
         XCTAssertTrue((q["scope"] ?? "").contains("cclog"))
     }
+
+    func testCliBuildBlobPreservesRefreshTokenAndUnknownKeys() throws {
+        let old = try JSONSerialization.data(withJSONObject: [
+            "access_token": "OLD", "refresh_token": "KEEP-RT",
+            "scope": "cloud-platform", "extra": "keep",
+        ] as [String: Any])
+        let tokens = FreshTokens(accessToken: "NEW", refreshToken: nil, idToken: nil, expiresAtMs: 999)
+        let blob = try GeminiCliLoginAdapter().buildBlob(old: old, tokens: tokens)
+        let root = try JSONSerialization.jsonObject(with: blob) as! [String: Any]
+        XCTAssertEqual(root["access_token"] as? String, "NEW")
+        XCTAssertEqual(root["refresh_token"] as? String, "KEEP-RT")   // preserved
+        XCTAssertEqual(root["extra"] as? String, "keep")              // preserved
+    }
+
+    func testAntigravityBuildBlobPreservesRefreshToken() throws {
+        let inner = try JSONSerialization.data(withJSONObject: [
+            "token": ["access_token": "OLD", "refresh_token": "KEEP-RT",
+                      "expiry": "2026-01-01T00:00:00+00:00"] as [String: Any],
+            "auth_method": "consumer",
+        ] as [String: Any])
+        let old = Data(Gemini.encodeGoKeyring(inner).utf8)
+        let tokens = FreshTokens(accessToken: "NEW", refreshToken: nil, idToken: nil, expiresAtMs: 999)
+        let blob = try GeminiAntigravityLoginAdapter().buildBlob(old: old, tokens: tokens)
+        let creds = Gemini.antigravityCreds(from: blob)
+        XCTAssertEqual(creds?.accessToken, "NEW")
+        XCTAssertEqual(creds?.refreshToken, "KEEP-RT")
+    }
 }

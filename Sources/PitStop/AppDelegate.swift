@@ -1227,7 +1227,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func performLogin(_ account: MenuAccount) {
         guard !loginInFlight else { return }
         loginInFlight = true
-        let adapter: LoginAdapter = account.isCodex ? CodexLoginAdapter() : ClaudeLoginAdapter()
+        let adapter: LoginAdapter
+        if account.isGemini {
+            // Re-auth the surface PitStop polls with (CLI if present, else Antigravity).
+            let onCli = geminiStore.profiles.first(where: { $0.email == account.email })?.onCli ?? true
+            adapter = onCli ? GeminiCliLoginAdapter() : GeminiAntigravityLoginAdapter()
+        } else if account.isCodex {
+            adapter = CodexLoginAdapter()
+        } else {
+            adapter = ClaudeLoginAdapter()
+        }
         let email = account.email
         let ui = OAuthLoginCoordinator.UI(
             openURL: { url in NSWorkspace.shared.open(url) },

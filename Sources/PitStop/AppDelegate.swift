@@ -51,11 +51,12 @@ enum IndicatorMetric: String, CaseIterable {
 /// A usage provider — the menu groups accounts under one section per provider.
 /// Add a case (and its title) to extend PitStop to another service.
 enum Provider: CaseIterable {
-    case claude, codex
+    case claude, codex, gemini
     var title: String {
         switch self {
         case .claude: return "Claude"
         case .codex: return "Codex"
+        case .gemini: return "Gemini"
         }
     }
 }
@@ -66,27 +67,38 @@ enum Provider: CaseIterable {
 /// account can share an email yet be different services, so per-account state
 /// is keyed by `key` (provider-namespaced), not bare email.
 struct MenuAccount {
-    enum Source { case code, desktop, both, codex }
+    enum Source { case code, desktop, both, codex, geminiCli, geminiAntigravity, geminiBoth }
     var email: String
     var source: Source
     var planLabel: String
     var isActive: Bool
 
     var isCodex: Bool { source == .codex }
-    var provider: Provider { isCodex ? .codex : .claude }
+    var isGemini: Bool {
+        switch source { case .geminiCli, .geminiAntigravity, .geminiBoth: return true; default: return false }
+    }
+    var provider: Provider {
+        if isCodex { return .codex }
+        if isGemini { return .gemini }
+        return .claude
+    }
     /// Switchable providers: Claude Code (owns the live credential keychain
     /// item) and Codex (owns ~/.codex/auth.json). Desktop is observe-only — its
     /// login lives in that app. The live account of each is filtered out by the
     /// `!isActive` guard at the call site (it's already current).
     var canSwitch: Bool {
         switch source {
-        case .code, .both, .codex: return true
+        case .code, .both, .codex, .geminiCli, .geminiAntigravity, .geminiBoth: return true
         case .desktop: return false
         }
     }
     /// Storage key for usage/error/backoff dicts — namespaced by provider so a
     /// Claude and a Codex account with the same email don't collide.
-    var key: String { isCodex ? "codex:\(email)" : email }
+    var key: String {
+        if isCodex { return "codex:\(email)" }
+        if isGemini { return "gemini:\(email)" }
+        return email
+    }
     /// Which surface within the provider — shown as a small tag, since the
     /// provider itself is now the section header. Codex has one surface (the
     /// CLI and app share a login), so it needs none.
@@ -96,6 +108,9 @@ struct MenuAccount {
         case .both: return "Code · Desktop"   // switchable, and the Desktop login
         case .desktop: return "Desktop"
         case .codex: return nil
+        case .geminiCli: return "CLI"
+        case .geminiAntigravity: return "Antigravity"
+        case .geminiBoth: return "CLI · Antigravity"
         }
     }
 }

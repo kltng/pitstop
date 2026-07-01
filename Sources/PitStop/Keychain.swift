@@ -72,7 +72,25 @@ enum Keychain {
     private static let notFound: Int32 = 44
 
     /// Read a generic password. Pass `account: nil` to match by service alone.
+    /// When a specific account is missing, falls back to (and promotes) its
+    /// staging sibling — a crash between upsert's delete and add can leave the
+    /// only copy there.
     static func read(service: String, account: String? = nil) async throws -> Data? {
+        if let data = try await readRaw(service: service, account: account) { return data }
+        guard let account,
+              let staged = try? await readRaw(service: service,
+                                              account: stagingAccount(for: account)),
+              let value = String(data: staged, encoding: .utf8) else { return nil }
+        // Promote the stranded copy back to the real item (best-effort).
+        let r = try? await run(["add-generic-password", "-s", service, "-a", account, "-w", value])
+        if r?.status == 0 {
+            _ = try? await run(["delete-generic-password", "-s", service,
+                                "-a", stagingAccount(for: account)])
+        }
+        return staged
+    }
+
+    private static func readRaw(service: String, account: String?) async throws -> Data? {
         var args = ["find-generic-password", "-s", service]
         if let account { args += ["-a", account] }
         args.append("-w")

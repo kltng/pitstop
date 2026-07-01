@@ -326,26 +326,26 @@ final class LoopbackServer {
         throw ServerError(msg: "No free loopback port in \(ports)")
     }
 
-    /// Await the first callback (blocking accept on a background queue), racing a
-    /// timeout. `stop()` unblocks a pending accept so the task can be cancelled.
+    /// Await the first callback. Uses `poll()` with a deadline so the timeout
+    /// path never leaves a thread blocked in `accept()` — a task-group race with
+    /// a blocking accept deadlocks, because the group awaits the (still-blocked)
+    /// accept child before it can return the timeout.
     func waitForCallback(timeout: TimeInterval) async throws -> Captured {
         let listenFD = fd
         guard listenFD >= 0 else { throw ServerError(msg: "Loopback server not started") }
-        return try await withThrowingTaskGroup(of: Captured.self) { group in
-            group.addTask { try await self.acceptOne(listenFD) }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
-                throw ServerError(msg: "Timed out waiting for the browser")
-            }
-            defer { group.cancelAll() }
-            let result = try await group.next()!
-            return result
-        }
-    }
-
-    private func acceptOne(_ listenFD: Int32) async throws -> Captured {
-        try await withCheckedThrowingContinuation { cont in
+        return try await withCheckedThrowingContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
+                var pfd = pollfd(fd: listenFD, events: Int16(POLLIN), revents: 0)
+                let pr = poll(&pfd, 1, Int32(max(timeout, 0) * 1000))
+                if pr == 0 {
+                    cont.resume(throwing: ServerError(msg: "Timed out waiting for the browser")); return
+                }
+                if pr < 0 {
+                    cont.resume(throwing: ServerError(msg: "poll failed (errno \(errno))")); return
+                }
+                if (pfd.revents & Int16(POLLIN)) == 0 {
+                    cont.resume(throwing: ServerError(msg: "Loopback socket closed")); return
+                }
                 let client = accept(listenFD, nil, nil)
                 guard client >= 0 else {
                     cont.resume(throwing: ServerError(msg: "accept failed (errno \(errno))")); return

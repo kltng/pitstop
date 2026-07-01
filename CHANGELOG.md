@@ -6,6 +6,60 @@ appear on [GitHub Releases](https://github.com/Livin21/pitstop/releases).
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-07-02
+### Added
+- **Per-model scoped weekly limits** (e.g. **Fable**), parsed from the usage
+  API's new `limits` array and shown as their own labelled bar on Claude rows.
+  They count toward the binding number, so the menu bar %, most-urgent
+  tracking, auto-switch, threshold notifications, and projections all react.
+  One parser covers both Claude Code and Claude Desktop rows, and future
+  scoped limits appear automatically.
+- Keychain reads recover credentials stranded in the `#staging` item after a
+  crash mid-write.
+- Single-instance lock: a second PitStop (e.g. a dev binary) exits at launch
+  instead of fighting over the live credential files.
+
+### Fixed
+- **Gemini switching corrupted `~/.gemini/oauth_creds.json`.** Snapshots are
+  now normalized before keychain storage (multi-line secrets read back
+  hex-encoded), already-corrupted entries heal on read, and Antigravity-only
+  switches update the active Google email so tokens can't be filed under the
+  wrong account.
+- Codex switches preserve an API-key-only `auth.json` instead of destroying
+  it; a half-failed Claude switch rolls the live keychain item back.
+- An external re-login (`claude` / `codex` / Gemini) heals a "re-login
+  needed" row within one refresh cycle instead of waiting out the 1-hour
+  backoff; the Desktop usage fallback no longer clears the Code account's
+  error state (which retried a dead refresh token every 2 minutes and hid the
+  Login button).
+- OAuth logins survive stray browser connections (preconnects, favicon
+  fetches) that previously consumed the single-use code and reported a
+  spurious "timed out"; clicking **Deny** on the consent page now reads as a
+  cancel instead of success; a non-JSON 200 from the token host is no longer
+  retried against the second host with the same code; the paste window's
+  close button no longer crashes the app.
+- Ghost usage from removed or signed-out accounts no longer drives the
+  most-urgent menu bar reading; refreshes requested while one is in flight
+  run afterward instead of being dropped.
+- The rebuild-from-source updater can no longer deadlock on long build output.
+- Antigravity token expiry timestamps with fractional seconds parse correctly
+  (previously refreshed against Google every cycle); the Gemini "no Code
+  Assist project" state clears on refresh / re-login instead of sticking
+  until relaunch.
+- Live credential file writes preserve dotfile symlinks; sub-minute reset
+  countdowns show "<1m" instead of "0m"; bar colors match the displayed
+  (rounded) percentage; notification banners appear while PitStop is the
+  active app; the launch-at-login toggle stays in sync with System Settings;
+  menu row views no longer leak on rebuild.
+
+### Changed
+- The auto-switch setting copy now discloses it covers Gemini
+  (CLI + Antigravity), which it always did.
+
+### Removed
+- The "Opus wk / Sonnet wk" extras line — the API retired those fields;
+  per-model scoped limits replace them.
+
 ## [0.3.1] - 2026-07-01
 ### Added
 - External-link icon (↗) on each provider section header (Claude, Codex, Gemini)
@@ -41,7 +95,8 @@ First versioned release.
 ### Fixed
 - Fall back to Desktop usage when a merged account's Claude Code fetch fails.
 
-[Unreleased]: https://github.com/Livin21/pitstop/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/Livin21/pitstop/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/Livin21/pitstop/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Livin21/pitstop/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/Livin21/pitstop/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/Livin21/pitstop/compare/v0.2.0...v0.2.1

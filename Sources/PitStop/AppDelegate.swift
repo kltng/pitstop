@@ -1031,22 +1031,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 .init(label: $0.label, utilization: $0.window.utilization,
                       resetText: Format.compactReset($0.window.resetsAt))
             }
-            if let r = report, r.extraUsageEnabled {
-                extras.append("Extra \(Format.percent(r.extraUsageUtilization))")
+            if let r = report, r.extraUsageEnabled, let v = r.extraUsageUtilization {
+                extras.append("Extra \(Format.percent(v))")
             }
             dataDate = report?.fetchedAt
         }
 
         var status: String?
         var statusIsInfo = false
+        var dimBars = false
         if account.isCodex, account.isActive, needsAction.contains(key) {
-            // The live Codex account's on-disk token is stale, but PitStop
-            // won't refresh it (that would rotate the token Codex is running
-            // on). Codex rewrites it on its own next refresh — so this is
-            // informational, not a warning the user must act on.
-            status = dataDate.map {
-                "Usage updates when Codex next saves its token · last seen \(Format.updated.string(from: $0))"
-            } ?? "Usage updates when Codex next saves its token"
+            // The live token on disk is stale and PitStop won't rotate it out
+            // from under Codex — show the last-known numbers, dimmed, until
+            // Codex saves a fresh token on its own.
+            dimBars = dataDate != nil
+            status = dataDate.map { "Last seen \(Format.shortClock($0))" } ?? "No usage data yet"
             statusIsInfo = true
         } else if let err = fetchError[key] {
             var text = err
@@ -1058,9 +1057,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                     ? " — retrying \(Format.relative(remaining))"
                     : " — retrying on next refresh"
             }
-            status = dataDate.map {
-                "⚠︎ \(text) · showing \(Format.updated.string(from: $0)) data"
-            } ?? "⚠︎ \(text)"
+            // Data under 10 minutes old needs no staleness caveat, and a
+            // transient hiccup with fresh data isn't worth an orange warning.
+            let dataAge = dataDate.map { Date().timeIntervalSince($0) }
+            if needsAction.contains(key) || dataAge == nil || dataAge! > 600 {
+                status = dataDate.map {
+                    "⚠︎ \(text) · showing \(Format.shortClock($0)) data"
+                } ?? "⚠︎ \(text)"
+            } else {
+                status = text
+                statusIsInfo = true
+            }
         } else if dataDate == nil {
             status = "Loading…"
         }
@@ -1077,6 +1084,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             isActive: account.isActive,
             sourceBadge: account.surfaceTag,
             bars: bars,
+            barsDimmed: dimBars,
             modelsLine: extras.isEmpty ? nil : extras.joined(separator: " · "),
             projectionLine: projection,
             statusLine: status,

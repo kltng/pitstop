@@ -17,7 +17,8 @@ final class AccountRowView: NSView {
         var isActive: Bool
         var sourceBadge: String? = nil  // e.g. "Desktop" — a quiet source tag
         var bars: [BarRow]
-        var modelsLine: String?    // "Opus wk 12% · Sonnet wk 10%"
+        var barsDimmed = false     // last-known (gated) data — render muted
+        var modelsLine: String?    // "Extra 4%"
         var projectionLine: String? = nil  // "↗ on pace to hit limit ~3:40 PM"
         var statusLine: String?    // error / stale / loading info
         var statusIsInfo: Bool = false  // muted (neutral) vs orange (warning)
@@ -199,11 +200,12 @@ final class AccountRowView: NSView {
                 let w = max(barWidth * min(pct, 100) / 100, pct > 0 ? 4 : 0)
                 if w > 0 {
                     let fill = NSRect(x: barX, y: y + 4.5, width: w, height: 5)
-                    fillColor.setFill()
+                    (model.barsDimmed ? fillColor.withAlphaComponent(0.45) : fillColor).setFill()
                     NSBezierPath(roundedRect: fill, xRadius: 2.5, yRadius: 2.5).fill()
                 }
                 if rounded >= 70 { pctColor = fillColor }
             }
+            if model.barsDimmed { pctColor = .tertiaryLabelColor }
 
             let pctFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
             let pctText = Format.percent(bar.utilization)

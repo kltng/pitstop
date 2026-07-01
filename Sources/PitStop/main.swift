@@ -152,9 +152,10 @@ if CommandLine.arguments.contains("--preview") {
                   modelsLine: nil, statusLine: nil, onSwitch: {}),
             .init(email: "codex-live@example.com",
                   planLabel: "Free", isActive: true,
-                  bars: [],
+                  bars: [.init(label: "5h", utilization: 34, resetText: Format.compactReset(tonight))],
+                  barsDimmed: true,
                   modelsLine: nil,
-                  statusLine: "Usage updates when Codex next saves its token",
+                  statusLine: "Last seen 2:31 AM",
                   statusIsInfo: true, onSwitch: nil),
         ]
         // Middle row rendered in its hover state to preview the Switch pill.

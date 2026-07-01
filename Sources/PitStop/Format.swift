@@ -35,7 +35,7 @@ enum Format {
         if d > 0 { return "in \(d)d \(h)h" }
         if h > 0 { return "in \(h)h \(m)m" }
         if m > 0 { return "in \(m)m" }
-        return "in \(total)s"
+        return total > 0 ? "in \(total)s" : "now"
     }
 
     static let updated: DateFormatter = {
@@ -67,7 +67,8 @@ enum Format {
         let m = (total % 3600) / 60
         if d > 0 { return "\(d)d \(h)h" }
         if h > 0 { return "\(h)h \(m)m" }
-        return "\(m)m"
+        if m > 0 { return "\(m)m" }
+        return "<1m"   // sub-minute (or already elapsed, clamped) — never "0m"
     }
 
     /// A coarse clock stamp for projections — "6:40 PM" today, "Sun 6:40 PM"

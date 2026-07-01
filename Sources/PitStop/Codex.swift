@@ -196,6 +196,63 @@ enum Codex {
         return try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
     }
 
+    // MARK: - Fresh login (authorization_code)
+
+    /// Build the authorization_code exchange request (form-urlencoded, no
+    /// `state` in the body — the shape the Codex CLI uses). Pure, for testing.
+    static func exchangeCodeRequest(code: String, verifier: String,
+                                    redirectURI: String) -> URLRequest {
+        var req = URLRequest(url: tokenURL)
+        req.httpMethod = "POST"
+        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 15
+        func enc(_ s: String) -> String {
+            var cs = CharacterSet.alphanumerics
+            cs.insert(charactersIn: "-._~")
+            return s.addingPercentEncoding(withAllowedCharacters: cs) ?? s
+        }
+        let fields = [
+            "grant_type": "authorization_code",
+            "code": code,
+            "redirect_uri": redirectURI,
+            "client_id": clientID,
+            "code_verifier": verifier,
+        ]
+        req.httpBody = Data(fields.map { "\($0.key)=\(enc($0.value))" }
+            .joined(separator: "&").utf8)
+        return req
+    }
+
+    /// Exchange an authorization code for Codex tokens.
+    static func exchangeCode(code: String, verifier: String,
+                             redirectURI: String) async throws -> Refreshed {
+        let (data, resp) = try await URLSession.shared.data(
+            for: exchangeCodeRequest(code: code, verifier: verifier, redirectURI: redirectURI))
+        guard let http = resp as? HTTPURLResponse else { throw CodexError.malformed }
+        if http.statusCode == 400 || http.statusCode == 401 || http.statusCode == 403 {
+            throw CodexError.sessionExpired
+        }
+        guard http.statusCode == 200,
+              let root = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let access = root["access_token"] as? String else {
+            throw CodexError.malformed
+        }
+        return Refreshed(accessToken: access,
+                         refreshToken: root["refresh_token"] as? String,
+                         idToken: root["id_token"] as? String)
+    }
+
+    /// Decode identity (email + ChatGPT account id) from an id_token JWT.
+    static func identity(fromIDToken idToken: String) -> (email: String, accountID: String?)? {
+        guard let claims = decodeJWTClaims(idToken) else { return nil }
+        let email = (claims["email"] as? String)
+            ?? ((claims["https://api.openai.com/profile"] as? [String: Any])?["email"] as? String)
+        guard let email else { return nil }
+        let auth = claims["https://api.openai.com/auth"] as? [String: Any]
+        let accountID = auth?["chatgpt_account_id"] as? String
+        return (email, accountID)
+    }
+
     private static let iso8601: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

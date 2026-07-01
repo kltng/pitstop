@@ -270,3 +270,28 @@ profile (a re-login is the same account, so the stored identity/plan is kept).
 9. **Keychain argv exposure** — the profile write uses
    `security add-generic-password` (secret via argv), the same exposure PitStop
    already accepts; no new risk.
+
+## E2E verification results (2026-07-01)
+
+Ran the real flow from an installed `PitStop.app` (build 57) against live accounts.
+All `[verify]` items resolved:
+
+- **Claude localhost loopback IS accepted.** claude.ai redirected to
+  `http://localhost:51000/callback` and PitStop captured the code — the
+  loopback auto-path works, so the code-paste fallback was not needed. (The
+  biggest open risk; resolved positively.)
+- **Claude token exchange + identity worked.** Exchange succeeded and
+  `GET /api/oauth/profile` returned the email, which matched the row; the
+  `livin2021` Claude row healed from "Token rejected" to `[Max · 5x]` fetching
+  usage. Plan label preserved → `subscriptionType`/`rateLimitTier` survived.
+- **Codex loopback on the fixed port 1455 worked.** `auth.openai.com` redirected
+  to `http://localhost:1455/auth/callback`; id_token identity matched; the
+  `livin2021` Codex row healed to `[Free]` with `30d 5%`.
+- **Profile-only invariant proven byte-for-byte.** Across both logins the live
+  stores were untouched: `Claude Code-credentials` keychain mdat unchanged,
+  `~/.claude.json` `oauthAccount` still `livinmathew99` (active identity not
+  switched), `~/.codex/auth.json` sha256 unchanged. (`~/.claude.json`'s file
+  hash changed only from Claude Code's own config bookkeeping — not PitStop.)
+- **Identity match enforced.** Both logins were performed signed in as the row's
+  own account (`livin2021`) and matched; the mismatch-reject path was not
+  exercised live but is unit-tested and gates `persist`.

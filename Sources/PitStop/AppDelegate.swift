@@ -1109,6 +1109,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             defer { loginInFlight = false }
             do {
                 try await OAuthLoginCoordinator().run(adapter: adapter, expectedEmail: email, ui: ui)
+                // The rejected token left a 1-hour backoff + needsAction on this
+                // account; clear it so the refresh below actually re-fetches with
+                // the fresh credentials and the row heals immediately (instead of
+                // staying "rejected" until the backoff expires).
+                clearFetchError(for: account.key)
                 Notifier.shared.post(title: "Signed in to \(displayEmail(email))",
                                      body: "Fresh credentials saved. This account is switchable again.")
                 refreshAll()

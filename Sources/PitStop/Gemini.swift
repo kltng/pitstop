@@ -101,4 +101,62 @@ enum Gemini {
         f.formatOptions = [.withInternetDateTime, .withTimeZone]
         return f
     }()
+
+    // MARK: - Usage
+
+    struct Usage {
+        struct Window { var label: String; var usedPercent: Double; var resetsAt: Date? }
+        var windows: [Window]
+        var fetchedAt = Date()
+        var maxUtilization: Double { windows.map(\.usedPercent).max() ?? 0 }
+    }
+
+    /// Parse a retrieveUserQuota response into per-model windows. Buckets whose
+    /// `remainingFraction` is missing are skipped (the field is optional).
+    static func parseQuota(_ data: Data) -> Usage {
+        guard let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let buckets = root["buckets"] as? [[String: Any]] else {
+            return Usage(windows: [])
+        }
+        let windows: [Usage.Window] = buckets.compactMap { b in
+            guard let model = b["modelId"] as? String,
+                  let frac = (b["remainingFraction"] as? NSNumber)?.doubleValue else { return nil }
+            let reset = (b["resetTime"] as? String).flatMap { quotaReset.date(from: $0) }
+            return Usage.Window(label: shortModelName(model),
+                                usedPercent: max(0, min(100, (1 - frac) * 100)),
+                                resetsAt: reset)
+        }
+        return Usage(windows: windows)
+    }
+
+    /// The compact extras line: the up-to-2 most-used models after the binding
+    /// one, dropping 0%. nil when there's nothing to add.
+    static func extrasLine(_ usage: Usage) -> String? {
+        let sorted = usage.windows.sorted { $0.usedPercent > $1.usedPercent }
+        let extras = sorted.dropFirst().filter { $0.usedPercent >= 0.5 }.prefix(2)
+        guard !extras.isEmpty else { return nil }
+        return extras.map { "\($0.label) \(Int($0.usedPercent.rounded()))%" }.joined(separator: " · ")
+    }
+
+    /// Parse loadCodeAssist -> (cloudaicompanionProject, short plan label).
+    static func parseLoadCodeAssist(_ data: Data) -> (project: String?, planLabel: String) {
+        let root = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        let project = root["cloudaicompanionProject"] as? String
+        let paid = (root["paidTier"] as? [String: Any])?["name"] as? String
+        let current = (root["currentTier"] as? [String: Any])?["name"] as? String
+        return (project, planLabel(paid: paid, current: current))
+    }
+
+    private static func planLabel(paid: String?, current: String?) -> String {
+        if let paid {
+            if paid.contains("Ultra") { return "Ultra" }
+            if paid.contains("Pro") { return "AI Pro" }
+        }
+        if let current { return current.replacingOccurrences(of: "Gemini ", with: "") }
+        return "Code Assist"
+    }
+
+    private static let quotaReset: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f
+    }()
 }

@@ -22,6 +22,7 @@ final class AccountRowView: NSView {
         var statusLine: String?    // error / stale / loading info
         var statusIsInfo: Bool = false  // muted (neutral) vs orange (warning)
         var onSwitch: (() -> Void)?  // nil = active (not clickable)
+        var onLogin: (() -> Void)?   // non-nil = show a coral "Login" pill; click re-authenticates
     }
 
     static let rowWidth: CGFloat = 408
@@ -80,7 +81,7 @@ final class AccountRowView: NSView {
     }
 
     override func mouseEntered(with event: NSEvent) {
-        guard model.onSwitch != nil else { return }
+        guard model.onSwitch != nil || model.onLogin != nil else { return }
         hovering = true
         needsDisplay = true
     }
@@ -91,16 +92,16 @@ final class AccountRowView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        guard let onSwitch = model.onSwitch else { return }
+        let action = model.onLogin ?? model.onSwitch
+        guard let action else { return }
         enclosingMenuItem?.menu?.cancelTracking()
-        // Let the menu finish closing before mutating state / notifying.
-        DispatchQueue.main.async { onSwitch() }
+        DispatchQueue.main.async { action() }
     }
 
     // MARK: - Drawing
 
     override func draw(_ dirtyRect: NSRect) {
-        if hovering, model.onSwitch != nil {
+        if (hovering && model.onSwitch != nil) || model.onLogin != nil {
             let r = NSRect(x: 6, y: 1, width: bounds.width - 12, height: bounds.height - 2)
             NSColor.labelColor.withAlphaComponent(0.07).setFill()
             NSBezierPath(roundedRect: r, xRadius: 6, yRadius: 6).fill()
@@ -114,10 +115,12 @@ final class AccountRowView: NSView {
             NSBezierPath(ovalIn: NSRect(x: 16, y: y + 4, width: 9, height: 9)).fill()
         }
 
-        // Plan chip (flips to a coral "Switch" pill on hover)
+        // Plan chip → coral "Switch" on hover, or always-coral "Login" when the
+        // row's token was rejected.
         let chipFont = NSFont.systemFont(ofSize: 10, weight: .medium)
-        let switching = hovering && model.onSwitch != nil
-        let chipText = switching ? "Switch" : model.planLabel
+        let isLogin = model.onLogin != nil
+        let switching = isLogin || (hovering && model.onSwitch != nil)
+        let chipText = isLogin ? "Login" : (switching ? "Switch" : model.planLabel)
         var emailMaxX = bounds.width - 12
         if !chipText.isEmpty {
             let textSize = chipText.size(withAttributes: [.font: chipFont])

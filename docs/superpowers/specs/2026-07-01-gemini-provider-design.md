@@ -244,3 +244,14 @@ are restored correctly.
    if `loadCodeAssist` returns none, degrade to presence-only.
 4. **Diverged-surface UX** — confirm the two-active-rows edge case reads sensibly.
 5. **ToS rotation** — surface the Antigravity caveat; keep auto-switch opt-in.
+
+## Correction (found in E2E, 2026-07-01)
+
+The Antigravity keychain blob (`gemini/antigravity`) carries NO `id_token` or
+email — only `token{access_token,refresh_token,expiry,token_type}` + `auth_method`.
+So the Antigravity surface's account identity is the **shared active Google
+account** from `~/.gemini/google_accounts.json` `active` (not decodable from the
+blob). `GeminiStore.liveAntigravityEmail` and the `captureCurrent` snapshot key
+use that shared active email, so the CLI and Antigravity surfaces merge into one
+row. (Genuine CLI≠Antigravity account divergence isn't representable — google_accounts.json
+holds a single `active` — and is out of scope.)

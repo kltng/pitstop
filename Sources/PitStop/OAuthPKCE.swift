@@ -21,7 +21,11 @@ enum OAuthPKCE {
 
     private static func randomBytes(_ count: Int) -> Data {
         var bytes = [UInt8](repeating: 0, count: count)
-        _ = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
+        if SecRandomCopyBytes(kSecRandomDefault, count, &bytes) != errSecSuccess {
+            // Never returns an error; still a CSPRNG on Darwin. An all-zero
+            // buffer here would mean a fixed, predictable verifier and state.
+            arc4random_buf(&bytes, count)
+        }
         return Data(bytes)
     }
 

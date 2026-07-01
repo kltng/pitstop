@@ -116,10 +116,12 @@ final class GeminiStore {
 
     // MARK: - Snapshot / switch
 
-    /// Snapshot both live surfaces into per-account saved profiles.
+    /// Snapshot both live surfaces into per-account saved profiles. Returns
+    /// the emails whose stored blobs actually changed (so the caller can
+    /// notice an external re-login).
     @discardableResult
-    func captureCurrent() async throws -> Bool {
-        var touched = false
+    func captureCurrent() async throws -> Set<String> {
+        var changed: Set<String> = []
         let cliBlob = liveCliBlob().map(Gemini.normalizedBlob)
         let cliEmail = cliBlob.flatMap(Gemini.cliCreds(from:))?.email
         let agBlob = await liveAntigravityBlob()
@@ -127,16 +129,16 @@ final class GeminiStore {
         // Google account (google_accounts.json), so it merges with the CLI row.
         let agEmail = agBlob != nil ? activeGoogleEmail() : nil
 
-        func upsert(_ blob: Data?, email: String?, service: String) async throws -> Bool {
-            guard let blob, let email else { return false }
+        func upsert(_ blob: Data?, email: String?, service: String) async throws {
+            guard let blob, let email else { return }
             if let stored = try? await Keychain.read(service: service, account: email), stored == blob {
-                return false
+                return
             }
             try await Keychain.upsert(service: service, account: email, data: blob)
-            return true
+            changed.insert(email)
         }
-        touched = try await upsert(cliBlob, email: cliEmail, service: Self.cliService) || touched
-        touched = try await upsert(agBlob, email: agEmail, service: Self.antigravityService) || touched
+        try await upsert(cliBlob, email: cliEmail, service: Self.cliService)
+        try await upsert(agBlob, email: agEmail, service: Self.antigravityService)
 
         // Merge metadata by email.
         for (email, isCli, isAg) in [(cliEmail, true, false), (agEmail, false, true)] {
@@ -151,8 +153,8 @@ final class GeminiStore {
             profiles.append(p)
         }
         profiles.sort { $0.email < $1.email }
-        if touched { try save() }
-        return touched
+        if !changed.isEmpty { try save() }
+        return changed
     }
 
     /// Set the plan label for an account (from a successful loadCodeAssist).

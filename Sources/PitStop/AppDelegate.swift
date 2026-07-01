@@ -297,7 +297,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             // Keep the saved copy of the live account in sync.
             do {
-                try await store.captureCurrent()
+                let capture = try await store.captureCurrent()
+                if capture.changed, let email = capture.profile?.email {
+                    credentialsRenewed(for: email)
+                }
             } catch {
                 lastTopLevelError = error.localizedDescription
             }
@@ -355,6 +358,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             nextFetchAllowed[email] = nil
         }
         return true
+    }
+
+    /// The stored credentials for `key` were externally replaced (a re-login
+    /// or the provider's own refresh). If the account was gated needs-action,
+    /// the new credentials are exactly the fix — clear the gate so this cycle
+    /// fetches instead of waiting out the hour. Rate-limit backoffs stay.
+    private func credentialsRenewed(for key: String) {
+        guard needsAction.contains(key) else { return }
+        clearFetchError(for: key)
     }
 
     /// Clear the error/backoff state for a key after a successful fetch.
@@ -449,7 +461,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func refreshCodexAccount() async {
         guard Codex.isPresent else { return }
         do {
-            try await codexStore.captureCurrent()
+            let capture = try await codexStore.captureCurrent()
+            if capture.changed, let email = capture.profile?.email {
+                credentialsRenewed(for: "codex:\(email)")
+            }
         } catch {
             lastTopLevelError = error.localizedDescription
         }
@@ -510,7 +525,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let hasCli = FileManager.default.fileExists(atPath: GeminiStore.cliCredsURL.path)
         let hasAntigravity = await geminiStore.liveAntigravityBlob() != nil
         guard hasCli || hasAntigravity else { return }
-        do { try await geminiStore.captureCurrent() } catch { lastTopLevelError = error.localizedDescription }
+        do {
+            for email in try await geminiStore.captureCurrent() {
+                credentialsRenewed(for: "gemini:\(email)")
+            }
+        } catch { lastTopLevelError = error.localizedDescription }
         geminiStore.load()
         geminiLiveCliEmail = geminiStore.liveCliEmail()
         geminiLiveAntigravityEmail = await geminiStore.liveAntigravityEmail()
@@ -1332,7 +1351,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     @objc private func saveCurrent(_ sender: Any?) {
         Task {
             do {
-                if let profile = try await store.captureCurrent() {
+                if let profile = try await store.captureCurrent().profile {
                     Notifier.shared.post(title: "Saved \(displayEmail(profile.email))",
                                          body: "This account can now be switched to from PitStop.")
                 } else {

@@ -69,11 +69,12 @@ final class CodexStore {
 
     /// Snapshot the live Codex account into a saved profile. Called on every
     /// refresh so the saved copy of the live account always holds the newest
-    /// tokens. Returns nil when nobody is signed in (or API-key auth).
+    /// tokens. `profile` is nil when nobody is signed in (or API-key auth);
+    /// `changed` reports whether new credentials were actually stored.
     @discardableResult
-    func captureCurrent() async throws -> CodexProfile? {
+    func captureCurrent() async throws -> (profile: CodexProfile?, changed: Bool) {
         guard let live = Codex.liveBlob(), let creds = Codex.credentials(from: live) else {
-            return nil
+            return (nil, false)
         }
         let email = creds.account.email
         // Store compact JSON (see Codex.normalizedBlob) — the pretty-printed
@@ -85,7 +86,7 @@ final class CodexStore {
         if let existing = profiles.first(where: { $0.email == email }),
            let stored = try? await Keychain.read(service: Self.service, account: email),
            stored == blob {
-            return existing
+            return (existing, false)
         }
 
         try await Keychain.upsert(service: Self.service, account: email, data: blob)
@@ -95,7 +96,7 @@ final class CodexStore {
         profiles.append(profile)
         profiles.sort { $0.email < $1.email }
         try save()
-        return profile
+        return (profile, true)
     }
 
     /// Make `email` the live Codex account: snapshot whatever's currently live

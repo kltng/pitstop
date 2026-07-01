@@ -99,12 +99,14 @@ final class ProfileStore {
 
     /// Snapshot the live Claude Code credentials + identity into a profile.
     /// Called on every refresh so the saved copy of the active account always
-    /// holds the newest tokens. Returns nil when nobody is logged in.
+    /// holds the newest tokens. `profile` is nil when nobody is logged in;
+    /// `changed` reports whether new credentials were actually stored (so the
+    /// caller can notice an external re-login).
     @discardableResult
-    func captureCurrent() async throws -> Profile? {
-        guard let blob = try await Keychain.read(service: CredentialBlob.liveService) else { return nil }
+    func captureCurrent() async throws -> (profile: Profile?, changed: Bool) {
+        guard let blob = try await Keychain.read(service: CredentialBlob.liveService) else { return (nil, false) }
         guard let account = ClaudeConfig.oauthAccount(),
-              let email = account["emailAddress"] as? String else { return nil }
+              let email = account["emailAddress"] as? String else { return (nil, false) }
 
         // Called on every refresh — skip the keychain/file writes when
         // nothing changed since the last capture.
@@ -112,7 +114,7 @@ final class ProfileStore {
            let storedBlob = try? await Keychain.read(service: CredentialBlob.profileService, account: email),
            storedBlob == blob,
            (existing.oauthAccount as NSDictionary) == (account as NSDictionary) {
-            return existing
+            return (existing, false)
         }
 
         let creds = try CredentialBlob.parse(blob)
@@ -125,7 +127,7 @@ final class ProfileStore {
         profiles.append(profile)
         profiles.sort { $0.email < $1.email }
         try save()
-        return profile
+        return (profile, true)
     }
 
     /// Make `email` the live Claude Code account: snapshot whatever is

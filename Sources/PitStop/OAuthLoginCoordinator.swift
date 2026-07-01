@@ -39,7 +39,8 @@ final class OAuthLoginCoordinator {
         let server = LoopbackServer()
         do {
             try server.start(ports: adapter.loopbackPorts)
-        } catch {
+        } catch is LoopbackServer.ServerError {
+            // No bindable loopback port: fall through to paste if supported.
             if !adapter.supportsPaste { throw LoginError.portUnavailable }
             try await runPaste(adapter: adapter, expectedEmail: expectedEmail, pkce: pkce, ui: ui)
             return

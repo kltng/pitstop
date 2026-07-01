@@ -47,6 +47,9 @@ final class OAuthLoginCoordinatorTests: XCTestCase {
                 code: "C", state: "S", verifier: "V", redirectURI: "x")
             XCTFail("expected mismatch")
         } catch {
+            guard case LoginError.identityMismatch = error else {
+                return XCTFail("expected .identityMismatch, got \(error)")
+            }
             XCTAssertTrue(a.persistedEmails.isEmpty)   // nothing written
         }
     }

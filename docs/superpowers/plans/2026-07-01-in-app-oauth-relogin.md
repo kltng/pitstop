@@ -1216,15 +1216,14 @@ final class OAuthLoginCoordinator {
                              code: cap.code, state: cap.state,
                              verifier: pkce.verifier, redirectURI: redirectURI)
             return
-        } catch let e as LoginError {
-            // identity/state failures are terminal; only a timeout falls through
-            if case .timedOut = e {} else if !(e is LoopbackServer.ServerError) { throw e }
-        } catch {
-            // timeout / accept error — fall through to paste if available
+        } catch is LoopbackServer.ServerError {
+            // No callback (timeout / socket closed): fall through to paste if the
+            // provider supports it. Any other error — state mismatch, identity
+            // mismatch, exchange failure — has already propagated out as terminal.
+            guard adapter.supportsPaste else { throw LoginError.timedOut }
         }
 
         server.stop()
-        guard adapter.supportsPaste else { throw LoginError.timedOut }
         try await runPaste(adapter: adapter, expectedEmail: expectedEmail, pkce: pkce, ui: ui)
     }
 

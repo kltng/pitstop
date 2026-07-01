@@ -137,6 +137,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var codexLiveEmail: String?
     /// Codex usage, keyed by the codex storage key ("codex:<email>").
     private var codexUsage: [String: Codex.Usage] = [:]
+    /// Saved Gemini accounts — snapshots of the CLI and Antigravity live surfaces.
+    private let geminiStore = GeminiStore()
+    /// The email currently live in the Gemini CLI surface.
+    private var geminiLiveCliEmail: String?
+    /// The email currently live in the Gemini Antigravity surface.
+    private var geminiLiveAntigravityEmail: String?
+    /// Gemini usage, keyed by the gemini storage key ("gemini:<email>").
+    private var geminiUsage: [String: Gemini.Usage] = [:]
+    /// Resolved cloudaicompanionProject per email (cached to avoid re-fetching).
+    private var geminiProject: [String: String] = [:]
     /// Recent (time, binding-utilization) samples per account key, for the
     /// time-to-limit projection. In-memory only; cleared on a window reset.
     private var usageHistory: [String: [(date: Date, util: Double)]] = [:]
@@ -299,6 +309,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
             await refreshDesktopAccount()
             await refreshCodexAccount()
+            await refreshGeminiAccount()
 
             lastRefresh = Date()
             recordUsageSamples()
@@ -483,6 +494,68 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Snapshot the live Gemini surfaces, then fetch the shared Code Assist usage
+    /// for each saved account (refreshing an inactive token if it has aged out).
+    private func refreshGeminiAccount() async {
+        let hasCli = FileManager.default.fileExists(atPath: GeminiStore.cliCredsURL.path)
+        let hasAntigravity = await geminiStore.liveAntigravityBlob() != nil
+        guard hasCli || hasAntigravity else { return }
+        do { try await geminiStore.captureCurrent() } catch { lastTopLevelError = error.localizedDescription }
+        geminiStore.load()
+        geminiLiveCliEmail = geminiStore.liveCliEmail()
+        geminiLiveAntigravityEmail = await geminiStore.liveAntigravityEmail()
+
+        for profile in geminiStore.profiles {
+            let key = "gemini:\(profile.email)"
+            guard passedBackoffGate(key) else { continue }
+            let isActive = profile.email == geminiLiveCliEmail || profile.email == geminiLiveAntigravityEmail
+            do {
+                let usage = try await fetchGeminiUsage(for: profile.email, isActive: isActive)
+                geminiUsage[key] = usage
+                clearFetchError(for: key)
+            } catch {
+                recordFetchError(error, for: key)
+                if case Gemini.GeminiError.sessionExpired = error, !isActive {
+                    fetchError[key] = "Session expired — sign in to Gemini again"
+                }
+            }
+        }
+    }
+
+    /// Fetch one Gemini account's usage, refreshing its token in memory and
+    /// (for inactive accounts) persisting the rotated access token.
+    private func fetchGeminiUsage(for email: String, isActive: Bool) async throws -> Gemini.Usage {
+        // Prefer the CLI surface; fall back to Antigravity.
+        let surface: Gemini.Surface = geminiStore.profiles.first(where: { $0.email == email })?.onCli == true ? .cli : .antigravity
+        guard let blob = try await geminiStore.blob(for: email, surface: surface, isActive: isActive),
+              let creds = (surface == .cli ? Gemini.cliCreds(from: blob) : Gemini.antigravityCreds(from: blob)) else {
+            throw Gemini.GeminiError.sessionExpired
+        }
+        var accessToken = creds.accessToken
+        // Refresh in memory if expired (Google refresh tokens don't rotate).
+        if creds.expiryMs <= Date().timeIntervalSince1970 * 1000, let rt = creds.refreshToken {
+            let fresh = try await Gemini.refresh(refreshToken: rt, client: Gemini.client(for: surface))
+            accessToken = fresh.accessToken
+            if !isActive {
+                let rebuilt: Data = surface == .cli
+                    ? GeminiStore.buildCliBlob(access: fresh.accessToken, refresh: rt,
+                                               idToken: fresh.idToken ?? creds.idToken, expiryMs: fresh.expiryMs)
+                    : GeminiStore.buildAntigravityBlob(access: fresh.accessToken, refresh: rt,
+                                                       idToken: fresh.idToken ?? creds.idToken,
+                                                       expiryISO: Gemini.iso8601.string(from: Date(timeIntervalSince1970: fresh.expiryMs / 1000)))
+                try await geminiStore.storeRefreshedBlob(rebuilt, email: email, surface: surface)
+            }
+        }
+        // Resolve + cache the cloudaicompanionProject.
+        if geminiProject[email] == nil {
+            let r = try await Gemini.loadProject(accessToken: accessToken)
+            geminiProject[email] = r.project
+            geminiStore.setPlanLabel(r.planLabel, email: email)
+        }
+        guard let project = geminiProject[email] else { throw Gemini.GeminiError.notSignedIn }
+        return try await Gemini.fetchUsage(accessToken: accessToken, project: project)
+    }
+
     /// Schedule a one-shot refresh for when the earliest active backoff
     /// expires, instead of letting the account idle until the next 2-min
     /// tick. Floored at 10 s so a tiny Retry-After can't turn into a hot
@@ -626,6 +699,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 let email = String(key.dropFirst("codex:".count))
                 consider(key, "\(displayEmail(email)) (Codex)", cu.maxUtilization)
             }
+            for (key, gu) in geminiUsage {
+                let email = String(key.dropFirst("gemini:".count))
+                consider(key, "\(displayEmail(email)) (Gemini)", gu.maxUtilization)
+            }
             guard let best else {
                 return MenuBarReading(pct: nil, isStale: false, tip: "PitStop — no usage data yet")
             }
@@ -668,6 +745,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                                     planLabel: c.planLabel,
                                     isActive: c.email == codexLiveEmail))
         }
+        for p in geminiStore.profiles {
+            let source = Self.geminiSource(onCli: p.onCli, onAntigravity: p.onAntigravity)
+            let active = p.email == geminiLiveCliEmail || p.email == geminiLiveAntigravityEmail
+            rows.append(MenuAccount(email: p.email, source: source, planLabel: p.planLabel, isActive: active))
+        }
         return rows
     }
 
@@ -675,6 +757,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// provider's usage store holds it. 999 = unknown, so it sorts last.
     private func headroom(_ account: MenuAccount) -> Double {
         if account.isCodex { return codexUsage[account.key]?.maxUtilization ?? 999 }
+        if account.isGemini { return geminiUsage[account.key]?.maxUtilization ?? 999 }
         return usage[account.key]?.maxUtilization ?? 999
     }
 
@@ -845,6 +928,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Test seam: set the needs-action set directly.
     func setNeedsActionForTest(_ keys: Set<String>) { needsAction = keys }
 
+    /// Merge the two Gemini live surfaces into a single `MenuAccount.Source`.
+    static func geminiSource(onCli: Bool, onAntigravity: Bool) -> MenuAccount.Source {
+        if onCli && onAntigravity { return .geminiBoth }
+        return onCli ? .geminiCli : .geminiAntigravity
+    }
+
     /// Assemble the display model for one account row. Bars and extras differ
     /// by provider (Anthropic 5h/7d + Opus/Sonnet vs Codex's generic windows);
     /// the stale/error/loading status line is shared via the storage key.
@@ -855,7 +944,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         var extras: [String] = []
         let dataDate: Date?
 
-        if account.isCodex {
+        if account.isGemini {
+            let gu = geminiUsage[key]
+            let windows = (gu?.windows ?? []).sorted { $0.usedPercent > $1.usedPercent }
+            if let binding = windows.first {
+                bars = [.init(label: binding.label, utilization: binding.usedPercent,
+                              resetText: Format.compactReset(binding.resetsAt))]
+            } else {
+                bars = []
+            }
+            if let extraStr = gu.flatMap(Gemini.extrasLine) { extras.append(extraStr) }
+            dataDate = gu?.fetchedAt
+        } else if account.isCodex {
             let cu = codexUsage[key]
             bars = (cu?.windows ?? []).map {
                 .init(label: $0.label, utilization: $0.usedPercent,

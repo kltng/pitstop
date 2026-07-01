@@ -15,6 +15,7 @@ final class LoginAdapterTests: XCTestCase {
         XCTAssertEqual(q["code_challenge_method"], "S256")
         XCTAssertEqual(q["state"], "ST")
         XCTAssertEqual(q["redirect_uri"], "http://localhost:51000/callback")
+        XCTAssertTrue((q["scope"] ?? "").contains("user:inference"))
         XCTAssertNil(q["code"])                       // no code=true in loopback mode
     }
 
@@ -62,6 +63,7 @@ final class LoginAdapterTests: XCTestCase {
         XCTAssertEqual(creds.refreshToken, "NEWR")
         XCTAssertEqual(creds.expiresAtMs, 9_999_000)
         XCTAssertEqual(creds.subscriptionType, "max")            // preserved
+        XCTAssertEqual(creds.rateLimitTier, "default_claude_max_5x")  // preserved
         let root = try JSONSerialization.jsonObject(with: blob) as? [String: Any]
         XCTAssertNotNil(root?["mcpOAuth"])                        // preserved verbatim
     }
@@ -83,5 +85,6 @@ final class LoginAdapterTests: XCTestCase {
         XCTAssertEqual(root?["auth_mode"] as? String, "chatgpt")             // preserved
         let toks = root?["tokens"] as? [String: Any]
         XCTAssertEqual(toks?["id_token"] as? String, "NEWID")
+        XCTAssertEqual(toks?["account_id"] as? String, "acct_1")            // preserved
     }
 }

@@ -95,6 +95,7 @@ final class AccountRowView: NSView {
         let action = model.onLogin ?? model.onSwitch
         guard let action else { return }
         enclosingMenuItem?.menu?.cancelTracking()
+        // Let the menu finish closing before mutating state / notifying.
         DispatchQueue.main.async { action() }
     }
 

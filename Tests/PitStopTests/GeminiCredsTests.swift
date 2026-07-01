@@ -40,6 +40,24 @@ final class GeminiCredsTests: XCTestCase {
         XCTAssertEqual(c?.email, "a@x.com")
     }
 
+    func testParseISO8601AcceptsFractionalSeconds() {
+        XCTAssertNotNil(Gemini.parseISO8601("2026-07-01T16:15:44+05:30"))
+        XCTAssertNotNil(Gemini.parseISO8601("2026-07-01T16:15:44.123Z"))
+        XCTAssertNotNil(Gemini.parseISO8601("2026-07-01T16:15:44.123456+05:30"))   // Go RFC3339Nano
+        XCTAssertNotNil(Gemini.parseISO8601("2026-07-01T16:15:44.123456789Z"))
+        XCTAssertNil(Gemini.parseISO8601("not-a-date"))
+    }
+
+    func testAntigravityCredsParseFractionalExpiry() {
+        let inner = try! JSONSerialization.data(withJSONObject: [
+            "token": ["access_token": "AT", "expiry": "2026-07-01T16:15:44.123456+05:30"],
+            "auth_method": "consumer",
+        ] as [String: Any])
+        let c = Gemini.antigravityCreds(from: Data(Gemini.encodeGoKeyring(inner).utf8))
+        XCTAssertNotNil(c)
+        XCTAssertGreaterThan(c!.expiryMs, 0, "fractional expiry must not zero out")
+    }
+
     func testShortModelName() {
         XCTAssertEqual(Gemini.shortModelName("gemini-3.1-pro-preview"), "3.1-pro")
         XCTAssertEqual(Gemini.shortModelName("gemini-2.5-flash"), "2.5-flash")

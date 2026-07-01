@@ -76,7 +76,7 @@ enum Gemini {
         let idToken = tok["id_token"] as? String
         // expiry is ISO8601 with tz offset; convert to ms (0 if unparseable).
         var expiryMs: Double = 0
-        if let e = tok["expiry"] as? String, let d = iso8601.date(from: e) {
+        if let e = tok["expiry"] as? String, let d = parseISO8601(e) {
             expiryMs = d.timeIntervalSince1970 * 1000
         }
         return Creds(accessToken: access,
@@ -113,6 +113,24 @@ enum Gemini {
         f.formatOptions = [.withInternetDateTime, .withTimeZone]
         return f
     }()
+
+    private static let iso8601Frac: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withTimeZone, .withFractionalSeconds]
+        return f
+    }()
+
+    /// RFC3339 with or without fractional seconds. ISO8601DateFormatter only
+    /// accepts exactly-millisecond fractions, but Antigravity's Go client
+    /// (RFC3339Nano) emits up to nine digits — strip the fraction and reparse.
+    static func parseISO8601(_ s: String) -> Date? {
+        if let d = iso8601.date(from: s) { return d }
+        if let d = iso8601Frac.date(from: s) { return d }
+        guard let dot = s.firstIndex(of: ".") else { return nil }
+        let rest = s[s.index(after: dot)...]
+        guard let tz = rest.firstIndex(where: { $0 == "+" || $0 == "-" || $0 == "Z" }) else { return nil }
+        return iso8601.date(from: String(s[..<dot]) + String(rest[tz...]))
+    }
 
     // MARK: - Credential patching
 
@@ -162,7 +180,7 @@ enum Gemini {
         let windows: [Usage.Window] = buckets.compactMap { b in
             guard let model = b["modelId"] as? String,
                   let frac = (b["remainingFraction"] as? NSNumber)?.doubleValue else { return nil }
-            let reset = (b["resetTime"] as? String).flatMap { quotaReset.date(from: $0) }
+            let reset = (b["resetTime"] as? String).flatMap(parseISO8601)
             return Usage.Window(label: shortModelName(model),
                                 usedPercent: max(0, min(100, (1 - frac) * 100)),
                                 resetsAt: reset)
@@ -196,10 +214,6 @@ enum Gemini {
         if let current { return current.replacingOccurrences(of: "Gemini ", with: "") }
         return "Code Assist"
     }
-
-    private static let quotaReset: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime]; return f
-    }()
 
     // MARK: - Network
 

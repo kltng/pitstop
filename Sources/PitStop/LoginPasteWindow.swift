@@ -24,6 +24,9 @@ final class LoginPasteWindowController: NSObject, NSWindowDelegate {
         // continuation exactly once like the Cancel button.
         let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 150),
                          styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        // ARC owns this window; without this, AppKit's close() sends an extra
+        // release and the close button / Cmd+W path over-releases (crash).
+        w.isReleasedWhenClosed = false
         w.delegate = self
         w.title = "Finish Claude sign-in"
         let label = NSTextField(wrappingLabelWithString:

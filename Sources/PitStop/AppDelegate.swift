@@ -1253,14 +1253,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Projected time one window hits 100% at its recent pace, from a
     /// least-squares fit over its samples — only with enough data, a clear rise,
     /// and the limit landing before the window resets. nil otherwise.
-    private func projectedFull(samples: [(date: Date, util: Double)]?,
-                               current: Double, resetsAt: Date?) -> Date? {
+    func projectedFull(samples: [(date: Date, util: Double)]?,
+                       current: Double, resetsAt: Date?) -> Date? {
         guard current < 100, let samples, samples.count >= 4,
               let first = samples.first, let last = samples.last else { return nil }
         guard last.date.timeIntervalSince(first.date) >= 600 else { return nil }  // ≥ 10 min of trend
         guard let rate = slopePerSecond(samples), rate > 0.0005 else { return nil }  // rising > ~1.8 %/h
         let projected = Date().addingTimeInterval((100 - current) / rate)
         guard projected > Date() else { return nil }
+        // A barely-used window projecting far into the future is noise, not a
+        // warning — only surface once the window is meaningfully used or the
+        // limit is genuinely close.
+        guard current >= 25 || projected.timeIntervalSinceNow <= 3 * 3600 else { return nil }
         if let resetsAt, projected >= resetsAt { return nil }   // window resets before it fills
         return projected
     }

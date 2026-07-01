@@ -16,8 +16,6 @@ struct ScopedWindow {
 struct UsageReport {
     var fiveHour: UsageWindow?
     var sevenDay: UsageWindow?
-    var sevenDayOpus: UsageWindow?
-    var sevenDaySonnet: UsageWindow?
     var scoped: [ScopedWindow] = []
     var extraUsageEnabled = false
     var extraUsageUtilization: Double?
@@ -99,8 +97,6 @@ enum UsageAPI {
         var report = UsageReport()
         report.fiveHour = window(root["five_hour"])
         report.sevenDay = window(root["seven_day"])
-        report.sevenDayOpus = window(root["seven_day_opus"])
-        report.sevenDaySonnet = window(root["seven_day_sonnet"])
         let limits = (root["limits"] as? [[String: Any]]) ?? []
         if report.fiveHour == nil { report.fiveHour = limitWindow(limits, kind: "session") }
         if report.sevenDay == nil { report.sevenDay = limitWindow(limits, kind: "weekly_all") }

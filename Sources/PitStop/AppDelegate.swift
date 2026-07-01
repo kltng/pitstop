@@ -759,6 +759,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func statusTip(email: String, report: UsageReport) -> String {
         var tip = "\(displayEmail(email))\n5-hour \(Format.percent(report.fiveHour?.utilization))"
             + " · weekly \(Format.percent(report.sevenDay?.utilization))"
+        for s in report.scoped {
+            tip += " · \(s.label) \(Format.percent(s.window.utilization))"
+        }
         if let err = fetchError[email] {
             tip += "\n⚠️ \(err) — showing data from \(Format.updated.string(from: report.fetchedAt))"
         }
@@ -1024,12 +1027,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                       resetText: Format.compactReset(report?.fiveHour?.resetsAt)),
                 .init(label: "7d", utilization: report?.sevenDay?.utilization,
                       resetText: Format.compactReset(report?.sevenDay?.resetsAt)),
-            ]
-            if let v = report?.sevenDayOpus?.utilization, v > 0 {
-                extras.append("Opus wk \(Format.percent(v))")
-            }
-            if let v = report?.sevenDaySonnet?.utilization, v > 0 {
-                extras.append("Sonnet wk \(Format.percent(v))")
+            ] + (report?.scoped ?? []).map {
+                .init(label: $0.label, utilization: $0.window.utilization,
+                      resetText: Format.compactReset($0.window.resetsAt))
             }
             if let r = report, r.extraUsageEnabled {
                 extras.append("Extra \(Format.percent(r.extraUsageUtilization))")
@@ -1214,10 +1214,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             return gu.windows.map { (label: $0.label, util: $0.usedPercent, resetsAt: $0.resetsAt) }
         }
         if let report = usage[key] {
-            return [("5h", report.fiveHour), ("7d", report.sevenDay)]
+            var windows = [("5h", report.fiveHour), ("7d", report.sevenDay)]
                 .compactMap { label, window in
                     window?.utilization.map { (label: label, util: $0, resetsAt: window?.resetsAt) }
                 }
+            windows += report.scoped.compactMap { s in
+                s.window.utilization.map { (label: s.label, util: $0, resetsAt: s.window.resetsAt) }
+            }
+            return windows
         }
         return []
     }

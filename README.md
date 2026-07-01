@@ -204,6 +204,11 @@ checkered pit-lane strip) is drawn programmatically — regenerate
 swift scripts/make-icon.swift
 ```
 
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for release history (also published on
+[GitHub Releases](https://github.com/Livin21/pitstop/releases)).
+
 ## Contributing
 
 Contributions are welcome — see [CONTRIBUTING.md](CONTRIBUTING.md) for build

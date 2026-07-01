@@ -9,6 +9,12 @@ let package = Package(
             name: "PitStop",
             path: "Sources/PitStop",
             swiftSettings: [.swiftLanguageMode(.v5)]
-        )
+        ),
+        .testTarget(
+            name: "PitStopTests",
+            dependencies: ["PitStop"],
+            path: "Tests/PitStopTests",
+            swiftSettings: [.swiftLanguageMode(.v5)]
+        ),
     ]
 )

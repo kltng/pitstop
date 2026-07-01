@@ -157,6 +157,11 @@ if CommandLine.arguments.contains("--preview") {
                   modelsLine: nil,
                   statusLine: "Last seen 2:31 AM",
                   statusIsInfo: true, onSwitch: nil),
+            .init(email: "gemini@example.com",
+                  planLabel: "AI Pro", isActive: false,
+                  bars: [.init(label: "2.5-flash-lite", utilization: 41,
+                               resetText: Format.compactReset(tonight))],
+                  modelsLine: "3-pro 12%", statusLine: nil, onSwitch: {}),
         ]
         // Middle row rendered in its hover state to preview the Switch pill.
         let rows = models.enumerated().map { i, m in

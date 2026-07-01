@@ -178,15 +178,26 @@ final class AccountRowView: NSView {
 
         y += 21
 
+        // Per-row label gutter: labels right-align into the space left of the
+        // bars, and a row whose labels outgrow the default gutter (Gemini
+        // model names) pushes its bars right instead of spilling into the
+        // leading margin. The bars' right edge stays fixed so the % and reset
+        // columns still line up across rows.
+        let labelFont = NSFont.systemFont(ofSize: 10, weight: .medium)
+        let maxLabelWidth = model.bars
+            .map { $0.label.size(withAttributes: [.font: labelFont]).width }
+            .max() ?? 0
+        let rowBarX = max(barX, contentX + maxLabelWidth + 6)
+        let rowBarWidth = barX + barWidth - rowBarX
+
         // Usage bars
         for bar in model.bars {
-            let labelFont = NSFont.systemFont(ofSize: 10, weight: .medium)
             let labelSize = bar.label.size(withAttributes: [.font: labelFont])
-            bar.label.draw(at: NSPoint(x: barX - 6 - labelSize.width, y: y + 1),
+            bar.label.draw(at: NSPoint(x: rowBarX - 6 - labelSize.width, y: y + 1),
                            withAttributes: [.font: labelFont,
                                             .foregroundColor: NSColor.secondaryLabelColor])
 
-            let trackRect = NSRect(x: barX, y: y + 4.5, width: barWidth, height: 5)
+            let trackRect = NSRect(x: rowBarX, y: y + 4.5, width: rowBarWidth, height: 5)
             NSColor.labelColor.withAlphaComponent(0.12).setFill()
             NSBezierPath(roundedRect: trackRect, xRadius: 2.5, yRadius: 2.5).fill()
 
@@ -197,9 +208,9 @@ final class AccountRowView: NSView {
                 let rounded = pct.rounded()
                 let fillColor: NSColor = rounded >= 90 ? .systemRed
                     : (rounded >= 70 ? .systemOrange : .systemGreen)
-                let w = max(barWidth * min(pct, 100) / 100, pct > 0 ? 4 : 0)
+                let w = max(rowBarWidth * min(pct, 100) / 100, pct > 0 ? 4 : 0)
                 if w > 0 {
-                    let fill = NSRect(x: barX, y: y + 4.5, width: w, height: 5)
+                    let fill = NSRect(x: rowBarX, y: y + 4.5, width: w, height: 5)
                     (model.barsDimmed ? fillColor.withAlphaComponent(0.45) : fillColor).setFill()
                     NSBezierPath(roundedRect: fill, xRadius: 2.5, yRadius: 2.5).fill()
                 }

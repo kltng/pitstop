@@ -34,6 +34,14 @@ final class SectionHeaderView: NSView {
             owner: self, userInfo: nil))
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // NSTrackingArea retains its owner, so view → area → view is a cycle;
+        // drop the areas when the view leaves the window so headers discarded
+        // by buildMenu() can deallocate.
+        if window == nil { trackingAreas.forEach(removeTrackingArea) }
+    }
+
     override func mouseEntered(with event: NSEvent) { hovering = true; needsDisplay = true }
     override func mouseExited(with event: NSEvent) { hovering = false; needsDisplay = true }
 

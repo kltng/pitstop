@@ -80,6 +80,15 @@ final class AccountRowView: NSView {
             owner: self, userInfo: nil))
     }
 
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // NSTrackingArea retains its owner, so view → area → view is a cycle;
+        // drop the areas when the view leaves the window so rows discarded by
+        // buildMenu() can deallocate. AppKit re-calls updateTrackingAreas if
+        // the view is ever attached again.
+        if window == nil { trackingAreas.forEach(removeTrackingArea) }
+    }
+
     override func mouseEntered(with event: NSEvent) {
         guard model.onSwitch != nil || model.onLogin != nil else { return }
         hovering = true
@@ -182,15 +191,18 @@ final class AccountRowView: NSView {
 
             var pctColor = NSColor.labelColor
             if let pct = bar.utilization {
-                let fillColor: NSColor = pct >= 90 ? .systemRed
-                    : (pct >= 70 ? .systemOrange : .systemGreen)
+                // Threshold on the rounded value — the same number the text
+                // shows — so a displayed "90%" is never un-red.
+                let rounded = pct.rounded()
+                let fillColor: NSColor = rounded >= 90 ? .systemRed
+                    : (rounded >= 70 ? .systemOrange : .systemGreen)
                 let w = max(barWidth * min(pct, 100) / 100, pct > 0 ? 4 : 0)
                 if w > 0 {
                     let fill = NSRect(x: barX, y: y + 4.5, width: w, height: 5)
                     fillColor.setFill()
                     NSBezierPath(roundedRect: fill, xRadius: 2.5, yRadius: 2.5).fill()
                 }
-                if pct >= 70 { pctColor = fillColor }
+                if rounded >= 70 { pctColor = fillColor }
             }
 
             let pctFont = NSFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)

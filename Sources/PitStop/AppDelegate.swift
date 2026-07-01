@@ -377,7 +377,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             needsAction.remove(email)
         case UsageAPI.APIError.unauthorized,
              ClaudeDesktop.DesktopError.sessionExpired,
-             Codex.CodexError.sessionExpired:
+             Codex.CodexError.sessionExpired,
+             Gemini.GeminiError.sessionExpired:
             // A rejected token/session won't heal on its own — don't hammer
             // the endpoint every cycle. Refresh Now (or a re-login noticed on
             // the next pass) clears this. It needs the user to act, so the row

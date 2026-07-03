@@ -54,12 +54,11 @@ final class CodexStore {
     }
 
     private func save() throws {
-        try FileManager.default.createDirectory(at: ProfileStore.directory,
-                                                withIntermediateDirectories: true)
+        try ProfileStore.ensureDirectory()
         let root: [String: Any] = ["profiles": profiles.map(\.asDict)]
         let data = try JSONSerialization.data(withJSONObject: root,
                                               options: [.prettyPrinted, .sortedKeys])
-        try data.write(to: Self.file, options: .atomic)
+        try AtomicFile.write(data, to: Self.file, mode: 0o600)
     }
 
     /// The email of the account currently live in `~/.codex/auth.json`.
@@ -135,11 +134,9 @@ final class CodexStore {
                                   data: Codex.normalizedBlob(data))
     }
 
-    /// Write a blob into the live `auth.json`, preserving its `600` mode (it
-    /// holds secrets). Atomic so a crash can't leave a half-written file.
+    /// Write a blob into the live `auth.json` at mode 600 (it holds secrets).
+    /// Atomic so a crash can't leave a half-written file.
     private func writeLive(_ blob: Data) throws {
-        try AtomicFile.write(blob, to: Codex.authURL)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600],
-                                              ofItemAtPath: Codex.authURL.path)
+        try AtomicFile.write(blob, to: Codex.authURL, mode: 0o600)
     }
 }

@@ -134,6 +134,19 @@ final class ProfileStore {
         }
     }
 
+    /// Create (or tighten) the config directory as user-only. The profile
+    /// metadata inside enumerates every saved account's email/org/plan — not
+    /// secrets, but nothing other local users need either. setAttributes runs
+    /// even when the directory already exists so pre-existing 755 installs
+    /// get tightened too.
+    static func ensureDirectory(_ directory: URL = ProfileStore.directory) throws {
+        try FileManager.default.createDirectory(at: directory,
+                                                withIntermediateDirectories: true,
+                                                attributes: [.posixPermissions: 0o700])
+        try FileManager.default.setAttributes([.posixPermissions: 0o700],
+                                              ofItemAtPath: directory.path)
+    }
+
     /// What the once-per-launch identity audit found for a profile.
     enum AuditOutcome: Equatable {
         case verified
@@ -165,12 +178,11 @@ final class ProfileStore {
     }
 
     private func save() throws {
-        try FileManager.default.createDirectory(at: deps.file.deletingLastPathComponent(),
-                                                withIntermediateDirectories: true)
+        try Self.ensureDirectory(deps.file.deletingLastPathComponent())
         let root: [String: Any] = ["profiles": profiles.map(\.asDict)]
         let data = try JSONSerialization.data(withJSONObject: root,
                                               options: [.prettyPrinted, .sortedKeys])
-        try data.write(to: deps.file, options: .atomic)
+        try AtomicFile.write(data, to: deps.file, mode: 0o600)
     }
 
     /// Snapshot the live Claude Code credentials + identity into a profile.

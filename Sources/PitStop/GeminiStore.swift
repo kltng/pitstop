@@ -59,10 +59,11 @@ final class GeminiStore {
     }
 
     private func save() throws {
-        try FileManager.default.createDirectory(at: ProfileStore.directory, withIntermediateDirectories: true)
+        try ProfileStore.ensureDirectory()
         let root: [String: Any] = ["profiles": profiles.map(\.asDict)]
-        try JSONSerialization.data(withJSONObject: root, options: [.prettyPrinted, .sortedKeys])
-            .write(to: Self.file, options: .atomic)
+        try AtomicFile.write(JSONSerialization.data(withJSONObject: root,
+                                                    options: [.prettyPrinted, .sortedKeys]),
+                             to: Self.file, mode: 0o600)
     }
 
     // MARK: - Pure blob builders (also used by re-login)
@@ -219,9 +220,7 @@ final class GeminiStore {
 
     /// Write the CLI blob into ~/.gemini/oauth_creds.json (mode 600).
     private func writeCliLive(_ blob: Data) throws {
-        try AtomicFile.write(blob, to: Self.cliCredsURL)
-        try FileManager.default.setAttributes([.posixPermissions: 0o600],
-                                              ofItemAtPath: Self.cliCredsURL.path)
+        try AtomicFile.write(blob, to: Self.cliCredsURL, mode: 0o600)
     }
 
     /// Set the active email in google_accounts.json, rotating the previous

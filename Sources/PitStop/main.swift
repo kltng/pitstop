@@ -184,8 +184,10 @@ if CommandLine.arguments.contains("--preview") {
         }
         let rep = container.bitmapImageRepForCachingDisplay(in: container.bounds)!
         container.cacheDisplay(in: container.bounds, to: rep)
+        // Atomic: /tmp is world-writable, and a rename replaces a planted
+        // symlink itself instead of following it to some other file.
         try! rep.representation(using: .png, properties: [:])!
-            .write(to: URL(fileURLWithPath: "/tmp/pitstop-preview.png"))
+            .write(to: URL(fileURLWithPath: "/tmp/pitstop-preview.png"), options: .atomic)
         print("Wrote /tmp/pitstop-preview.png")
     }
     exit(0)
@@ -195,8 +197,7 @@ if CommandLine.arguments.contains("--preview") {
 // binary): two instances would fight over the live credential files. flock
 // releases automatically if the process dies, so a stale lock can't wedge
 // future launches. The fd intentionally stays open for the app's lifetime.
-try? FileManager.default.createDirectory(at: ProfileStore.directory,
-                                         withIntermediateDirectories: true)
+try? ProfileStore.ensureDirectory()
 let lockFD = open(ProfileStore.directory.appendingPathComponent("pitstop.lock").path,
                   O_CREAT | O_RDWR, 0o600)
 if lockFD >= 0, flock(lockFD, LOCK_EX | LOCK_NB) != 0 {

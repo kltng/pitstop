@@ -5,6 +5,21 @@ All notable changes to PitStop are documented here. The format is based on
 appear on [GitHub Releases](https://github.com/Livin21/pitstop/releases).
 
 ## [Unreleased]
+### Security
+- Credential files PitStop restores (`~/.codex/auth.json`,
+  `~/.gemini/oauth_creds.json`) are now created mode 600 from birth instead
+  of being tightened after the write, closing the brief world-readable
+  window on first creation.
+- `~/.config/pitstop` is created (and existing installs tightened) to mode
+  700, and the profile metadata JSONs inside to 600 — account emails, org
+  names, and plan tiers are no longer readable by other local users.
+- The `--preview` debug render writes `/tmp/pitstop-preview.png` atomically,
+  so a symlink planted at that world-writable path can't redirect the write
+  onto another file.
+- The Claude Desktop cookie lookup escapes its SQL string literal
+  (defense-in-depth; the value was already a constant).
+- SECURITY.md's threat-surface list now covers the Gemini CLI / Antigravity
+  credential surfaces and the loopback OAuth re-login server.
 
 ## [0.5.0] - 2026-07-16
 ### Added

@@ -184,8 +184,11 @@ enum ClaudeDesktop {
         try fm.copyItem(at: cookiesURL, to: tmp)
         defer { try? fm.removeItem(at: tmp) }
 
+        // The sqlite3 CLI has no bind parameters; `name` is a constant today,
+        // but escape it anyway so this can never become an injection.
+        let quoted = name.replacingOccurrences(of: "'", with: "''")
         let sql = "SELECT hex(encrypted_value) FROM cookies "
-            + "WHERE host_key IN ('.claude.ai','claude.ai') AND name='\(name)' LIMIT 1;"
+            + "WHERE host_key IN ('.claude.ai','claude.ai') AND name='\(quoted)' LIMIT 1;"
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/sqlite3")
         p.arguments = [tmp.path, sql]

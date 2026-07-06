@@ -5,6 +5,8 @@ All notable changes to PitStop are documented here. The format is based on
 appear on [GitHub Releases](https://github.com/Livin21/pitstop/releases).
 
 ## [Unreleased]
+
+## [0.4.2] - 2026-07-06
 ### Fixed
 - **Two Claude accounts could report the same usage.** Saving an account
   pairs credentials from the keychain with an identity from `~/.claude.json`

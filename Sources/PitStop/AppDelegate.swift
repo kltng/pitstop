@@ -182,6 +182,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var refreshing = false
     /// An explicit Refresh Now arrived while a refresh was in flight.
     private var refreshQueued = false
+    /// Tail of the credential-operation chain. Refresh cycles and account
+    /// switches/saves read-modify-write the live credential stores across
+    /// many suspension points (each keychain call is a subprocess); run
+    /// concurrently, a switch landing mid-capture pairs one account's tokens
+    /// with another account's identity. Chaining makes them mutually exclusive.
+    private var credentialOps: Task<Void, Never>?
     /// True while an OAuth re-login is running (prevents overlapping logins).
     private var loginInFlight = false
     private let pasteWindow = LoginPasteWindowController()
@@ -281,10 +287,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refreshAll()
     }
 
+    /// Run `op` after every previously enqueued credential operation finishes.
+    private func serializedCredentialOp(_ op: @escaping @MainActor () async -> Void) {
+        let previous = credentialOps
+        credentialOps = Task { @MainActor in
+            await previous?.value
+            await op()
+        }
+    }
+
     private func refreshAll() {
         guard !refreshing else { refreshQueued = true; return }
         refreshing = true
-        Task { @MainActor in
+        serializedCredentialOp { [self] in
             defer {
                 refreshing = false
                 if refreshQueued {
@@ -311,6 +326,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 do {
                     let creds = try await freshCredentials(for: email,
                                                            isActive: email == activeEmail)
+                    // Self-heal installs poisoned before capture-time
+                    // verification existed: a row whose credentials belong to
+                    // another account gets gated instead of double-reporting
+                    // that account's usage. Active row excluded — its token is
+                    // the live item's, not the saved copy the audit deletes
+                    // (captureCurrent's verification polices the live pair,
+                    // and a verified capture overwrites a foreign saved copy).
+                    if email != activeEmail,
+                       case .poisoned(let owner) = await store.auditIdentity(
+                        email: email, accessToken: creds.accessToken) {
+                        usage[email] = nil
+                        recordFetchError(ProfileStore.ForeignCredentialsError(owner: owner),
+                                         for: email)
+                        continue
+                    }
                     let report = try await UsageAPI.fetchUsage(accessToken: creds.accessToken)
                     recordFetchSuccess(report, for: email)
                 } catch {
@@ -399,7 +429,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case UsageAPI.APIError.unauthorized,
              ClaudeDesktop.DesktopError.sessionExpired,
              Codex.CodexError.sessionExpired,
-             Gemini.GeminiError.sessionExpired:
+             Gemini.GeminiError.sessionExpired,
+             is ProfileStore.ForeignCredentialsError:
             // A rejected token/session won't heal on its own — don't hammer
             // the endpoint every cycle. Refresh Now (or a re-login noticed on
             // the next pass) clears this. It needs the user to act, so the row
@@ -1123,7 +1154,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     // MARK: - Actions
 
     private func performSwitch(to email: String, auto: Bool = false, reason: String? = nil) {
-        Task {
+        serializedCredentialOp { [self] in
             do {
                 try await store.switchTo(email: email)
                 activeEmail = email
@@ -1337,7 +1368,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     /// Switch the live Codex account by swapping `~/.codex/auth.json`.
     private func performCodexSwitch(to email: String, auto: Bool = false, reason: String? = nil) {
-        Task {
+        serializedCredentialOp { [self] in
             do {
                 try await codexStore.switchTo(email: email)
                 codexLiveEmail = email
@@ -1355,7 +1386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Switch the live Gemini account by swapping BOTH surfaces (CLI file +
     /// Antigravity keychain) to `email`.
     private func performGeminiSwitch(to email: String, auto: Bool = false, reason: String? = nil) {
-        Task {
+        serializedCredentialOp { [self] in
             do {
                 try await geminiStore.switchTo(email: email)
                 geminiLiveCliEmail = geminiStore.liveCliEmail()
@@ -1370,7 +1401,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func saveCurrent(_ sender: Any?) {
-        Task {
+        serializedCredentialOp { [self] in
             do {
                 if let profile = try await store.captureCurrent().profile {
                     Notifier.shared.post(title: "Saved \(displayEmail(profile.email))",

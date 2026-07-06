@@ -5,6 +5,18 @@ All notable changes to PitStop are documented here. The format is based on
 appear on [GitHub Releases](https://github.com/Livin21/pitstop/releases).
 
 ## [Unreleased]
+### Fixed
+- **Two Claude accounts could report the same usage.** Saving an account
+  pairs credentials from the keychain with an identity from `~/.claude.json`
+  — two stores Claude Code writes at different moments. A read that landed
+  mid-switch (an external `claude /login`, or PitStop's own switch racing a
+  refresh) filed one account's tokens under the other's email, and both rows
+  then fetched the same account forever. Captures now confirm the token's
+  owner with the identity endpoint before filing (refreshing an expired token
+  first), account switches and refresh cycles are serialized so their
+  keychain/config reads can't interleave, and a once-per-launch audit deletes
+  already-poisoned saved credentials and gates the row with "Was showing
+  <owner>'s usage — sign in again" instead of double-reporting.
 
 ## [0.4.1] - 2026-07-02
 ### Changed

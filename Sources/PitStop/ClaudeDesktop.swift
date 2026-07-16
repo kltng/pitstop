@@ -18,7 +18,7 @@ import CommonCrypto
 ///    payload shape as the OAuth endpoint (so `UsageAPI.parse` is reused).
 enum ClaudeDesktop {
     /// The logged-in Claude Desktop account (identity only — no secrets).
-    struct Account: Equatable {
+    struct Account: Codable, Equatable {
         var email: String
         var orgUUID: String
         var planLabel: String

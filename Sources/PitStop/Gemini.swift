@@ -163,8 +163,8 @@ enum Gemini {
 
     // MARK: - Usage
 
-    struct Usage {
-        struct Window { var label: String; var usedPercent: Double; var resetsAt: Date? }
+    struct Usage: Codable, Equatable {
+        struct Window: Codable, Equatable { var label: String; var usedPercent: Double; var resetsAt: Date? }
         var windows: [Window]
         var fetchedAt = Date()
         var maxUtilization: Double { windows.map(\.usedPercent).max() ?? 0 }

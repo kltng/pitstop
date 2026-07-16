@@ -32,8 +32,8 @@ enum Codex {
     private static let tokenURL = URL(string: "https://auth.openai.com/oauth/token")!
 
     /// Provider-neutral usage for the row: a labelled bar per rate-limit window.
-    struct Usage {
-        struct Window {
+    struct Usage: Codable, Equatable {
+        struct Window: Codable, Equatable {
             var label: String          // "5h" / "7d" / "30d"
             var usedPercent: Double
             var resetsAt: Date?

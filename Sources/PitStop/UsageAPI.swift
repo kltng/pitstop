@@ -1,6 +1,6 @@
 import Foundation
 
-struct UsageWindow {
+struct UsageWindow: Codable, Equatable {
     let utilization: Double?
     let resetsAt: Date?
 }
@@ -8,12 +8,12 @@ struct UsageWindow {
 /// A per-model weekly limit ("Fable", …) from the limits array's
 /// weekly_scoped entries. An independent cap: hitting it blocks only that
 /// model, but per user preference it still counts toward the binding number.
-struct ScopedWindow {
+struct ScopedWindow: Codable, Equatable {
     let label: String
     let window: UsageWindow
 }
 
-struct UsageReport {
+struct UsageReport: Codable, Equatable {
     var fiveHour: UsageWindow?
     var sevenDay: UsageWindow?
     var scoped: [ScopedWindow] = []

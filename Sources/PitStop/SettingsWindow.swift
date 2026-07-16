@@ -40,7 +40,7 @@ struct SettingsView: View {
                     Toggle("Trigger on weekly limits (7d / 30d)", isOn: $triggerWeekly)
                     Toggle("Trigger on per-model limits (Fable, Gemini quotas)", isOn: $triggerPerModel)
                 }
-                Text("Flips the live account of each switchable provider — Claude Code, Codex, and Gemini (CLI + Antigravity) — to the one with the most headroom, and notifies you. Claude Desktop is read-only, so it's left alone. Gemini's limits are all per-model, so unchecking per-model limits turns Gemini auto-switch off.")
+                Text("Flips the live account of each switchable provider — Claude Code, Codex, and Gemini (CLI + Antigravity) — to the one with the most headroom, and notifies you. Claude Desktop is read-only, so it's left alone. Gemini's limits are all per-model, so unchecking per-model limits turns Gemini auto-switch off; unchecking all three turns auto-switch off everywhere.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

@@ -68,8 +68,10 @@ Three new UserDefaults bools, default `true` (absent key reads as enabled):
 - `autoSwitchOnPerModel`
 
 Exposed as `Settings.autoSwitchKinds: Set<LimitKind>`. All three keys are
-added to `Settings.observedKeys` so toggling re-evaluates the menu/auto-switch
-immediately.
+added to `Settings.observedKeys` so the menu bar and menu refresh immediately;
+auto-switch itself reads the keys live at each evaluation, so a toggle takes
+effect by the next refresh cycle (≤2 min) — the same latency as the existing
+auto-switch enable/threshold settings.
 
 ## Auto-switch semantics
 
@@ -98,8 +100,9 @@ Trigger on:
 ☑ Per-model limits (Fable, Gemini quotas)
 ```
 
-The existing auto-switch caption gains one sentence: "Gemini's limits are all
-per-model, so unchecking per-model limits turns Gemini auto-switch off."
+The existing auto-switch caption gains: "Gemini's limits are all per-model,
+so unchecking per-model limits turns Gemini auto-switch off; unchecking all
+three turns auto-switch off everywhere."
 
 ## Testing
 

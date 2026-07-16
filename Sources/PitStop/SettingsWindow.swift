@@ -15,6 +15,9 @@ struct SettingsView: View {
     @AppStorage("autoSwitchOnSession") private var triggerSession = true
     @AppStorage("autoSwitchOnWeekly") private var triggerWeekly = true
     @AppStorage("autoSwitchOnPerModel") private var triggerPerModel = true
+    @AppStorage("sessionWarmingEnabled") private var warming = false
+    @AppStorage("warmWindowStartMinutes") private var warmStart = 360
+    @AppStorage("warmWindowEndMinutes") private var warmEnd = 1080
     @AppStorage("showProjection") private var showProjection = true
 
     var body: some View {
@@ -44,6 +47,18 @@ struct SettingsView: View {
                     .font(.caption).foregroundStyle(.secondary)
             }
 
+            Section("Session warming") {
+                Toggle("Keep Claude sessions started", isOn: $warming)
+                if warming {
+                    DatePicker("From", selection: timeBinding($warmStart),
+                               displayedComponents: .hourAndMinute)
+                    DatePicker("To", selection: timeBinding($warmEnd),
+                               displayedComponents: .hourAndMinute)
+                }
+                Text("Starts a 5-hour session on every saved Claude account whenever none is running during these hours, so limit resets land inside your day instead of at its end. Costs about one token per account per session.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+
             Section("Usage") {
                 Toggle("Show time-to-limit projection", isOn: $showProjection)
                 Text("Estimates when a window will hit 100% at your recent pace, shown only when that's before it resets.")
@@ -57,6 +72,21 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 430)
         .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// An hourAndMinute DatePicker over a minutes-since-midnight Int.
+    /// Only the time-of-day components of the Date are meaningful.
+    private func timeBinding(_ minutes: Binding<Int>) -> Binding<Date> {
+        Binding(
+            get: {
+                Calendar.current.date(bySettingHour: minutes.wrappedValue / 60,
+                                      minute: minutes.wrappedValue % 60, second: 0,
+                                      of: Date()) ?? Date()
+            },
+            set: {
+                let c = Calendar.current.dateComponents([.hour, .minute], from: $0)
+                minutes.wrappedValue = (c.hour ?? 0) * 60 + (c.minute ?? 0)
+            })
     }
 }
 

@@ -63,6 +63,26 @@ enum Settings {
         return kinds
     }
 
+    /// Proactively start a 5-hour session on each saved Claude account when
+    /// none is running (see SessionWarmer). Off by default — it sends
+    /// requests on the user's behalf.
+    static var sessionWarmingEnabled: Bool {
+        UserDefaults.standard.bool(forKey: "sessionWarmingEnabled")
+    }
+
+    /// Warming window bounds, minutes since local midnight (default
+    /// 6:00 AM – 6:00 PM). 0 (midnight) is a valid stored value, so absence
+    /// is detected via object(forKey:) — the auto-switch absent-key pattern.
+    static var warmWindowStartMinutes: Int {
+        UserDefaults.standard.object(forKey: "warmWindowStartMinutes") == nil
+            ? 360 : UserDefaults.standard.integer(forKey: "warmWindowStartMinutes")
+    }
+
+    static var warmWindowEndMinutes: Int {
+        UserDefaults.standard.object(forKey: "warmWindowEndMinutes") == nil
+            ? 1080 : UserDefaults.standard.integer(forKey: "warmWindowEndMinutes")
+    }
+
     /// Show a "≈ full HH:MM at this pace" projection on rows trending toward a
     /// limit. On by default; only renders when the trend is meaningful.
     static var showProjection: Bool {
@@ -75,5 +95,6 @@ enum Settings {
         "indicatorStyle", "indicatorMetric", "menuBarSource",
         "autoSwitchEnabled", "autoSwitchThreshold", "showProjection",
         "autoSwitchOnSession", "autoSwitchOnWeekly", "autoSwitchOnPerModel",
+        "sessionWarmingEnabled", "warmWindowStartMinutes", "warmWindowEndMinutes",
     ]
 }

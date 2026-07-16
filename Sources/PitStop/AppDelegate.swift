@@ -165,6 +165,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// Last successful report per account — kept on fetch failure so the
     /// display degrades to stale data instead of going blank.
     private var usage: [String: UsageReport] = [:]
+    /// Last session-warm attempt per account, successful or not — the
+    /// cooldown that keeps a failure (or a not-yet-refreshed report) from
+    /// hammering. In-memory only, deliberately NOT in UsageCache: the next
+    /// fetch answers "is a session running" authoritatively, and a duplicate
+    /// warm during an active session is a harmless no-op.
+    private var lastWarmAttempt: [String: Date] = [:]
     private var fetchError: [String: String] = [:]
     /// Keys whose error needs the user to act (re-auth / switch) rather than
     /// just waiting — so the row doesn't promise a "retrying in …" that can't
@@ -363,6 +369,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             checkThresholds()
             evaluateAutoSwitch()
+            await evaluateSessionWarming()
             scheduleBackoffRetry()
             checkForUpdatesIfDue()
         }
@@ -1251,6 +1258,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 + "moved to \(displayEmail(target.0)) (\(Int(target.1.rounded()))% used).")
     }
 
+    /// Start a 5-hour session on each saved Claude account that has none
+    /// running (see SessionWarmer). Runs inside refreshAll's serialized
+    /// credential op — freshCredentials may rotate tokens, and those writes
+    /// must never race captureCurrent. Failures are silent by design: no
+    /// fetchError, no notification — just another attempt after the
+    /// cooldown. Broken, gated, or backed-off accounts are never poked.
+    private func evaluateSessionWarming() async {
+        guard Settings.sessionWarmingEnabled else { return }
+        let now = Date()
+        for profile in store.profiles {
+            let email = profile.email
+            guard fetchError[email] == nil, !needsAction.contains(email),
+                  nextFetchAllowed[email].map({ $0 <= now }) ?? true,
+                  SessionWarmer.shouldWarm(
+                      now: now,
+                      windowStartMinutes: Settings.warmWindowStartMinutes,
+                      windowEndMinutes: Settings.warmWindowEndMinutes,
+                      resetsAt: usage[email]?.fiveHour?.resetsAt,
+                      lastAttempt: lastWarmAttempt[email]) else { continue }
+            lastWarmAttempt[email] = now
+            guard let creds = try? await freshCredentials(for: email,
+                                                          isActive: email == activeEmail)
+            else { continue }
+            _ = await SessionWarmer.warm(accessToken: creds.accessToken)
+        }
+    }
+
     // MARK: - Usage projection
 
     /// Sample each account's per-window utilization (5-hour + weekly for Claude,
@@ -1464,6 +1498,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         codexUsage = codexUsage.filter { valid.contains($0.key) }
         geminiUsage = geminiUsage.filter { valid.contains($0.key) }
         fetchError = fetchError.filter { valid.contains($0.key) }
+        lastWarmAttempt = lastWarmAttempt.filter { valid.contains($0.key) }
         nextFetchAllowed = nextFetchAllowed.filter { valid.contains($0.key) }
         failureCount = failureCount.filter { valid.contains($0.key) }
         needsAction = needsAction.filter { valid.contains($0) }

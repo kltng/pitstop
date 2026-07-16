@@ -5,6 +5,8 @@ All notable changes to PitStop are documented here. The format is based on
 appear on [GitHub Releases](https://github.com/Livin21/pitstop/releases).
 
 ## [Unreleased]
+
+## [0.5.0] - 2026-07-16
 ### Added
 - **Choose which limits trigger auto-switch.** Settings gains trigger
   checkboxes — 5-hour, weekly (7d/30d), and per-model (Fable, Gemini

@@ -13,6 +13,18 @@ appear on [GitHub Releases](https://github.com/Livin21/pitstop/releases).
   enabled by default. Gemini's limits are all per-model, so unchecking
   per-model turns Gemini auto-switch off.
 
+### Fixed
+- **Blank panel after a relaunch that hit a rate limit.** Usage data lived
+  only in memory, so a launch whose very first fetch got a 429 had nothing
+  to show — every row collapsed to "Rate limited" with no bars for up to
+  15 minutes. The display state (usage bars, fetch errors, retry backoffs,
+  Desktop identity) now persists to `~/.config/pitstop/usage-cache.json`
+  after each refresh and is restored on launch, so a rate-limited start
+  degrades to the existing stale-data treatment ("⚠︎ Rate limited · showing
+  12:40 data") instead of a blank panel. Restored state ages out after a
+  day, and a relaunch no longer re-fetches accounts that were mid-backoff —
+  the relaunch itself stops feeding the rate limiter.
+
 ## [0.4.2] - 2026-07-06
 ### Fixed
 - **Two Claude accounts could report the same usage.** Saving an account

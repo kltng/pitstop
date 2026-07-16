@@ -230,6 +230,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        restoreUsageCache()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         statusItem.button?.imagePosition = .imageLeading
         updateStatusTitle()
@@ -355,6 +356,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             lastRefresh = Date()
             recordUsageSamples()
             pruneOrphanedState()
+            saveUsageCache()
             updateStatusTitle()
             if !(isMenuOpen && refreshOpenMenuInPlace()) {
                 buildMenu()
@@ -364,6 +366,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             scheduleBackoffRetry()
             checkForUpdatesIfDue()
         }
+    }
+
+    /// Restore the previous process's display state so the first render after
+    /// launch shows last-known bars instead of a blank panel — a launch whose
+    /// first fetch hits a rate limit degrades to the existing stale-data
+    /// treatment. refreshAll still runs immediately; restored backoffs gate
+    /// only the accounts that were mid-backoff when the app quit.
+    private func restoreUsageCache() {
+        guard let snap = UsageCache.load() else { return }
+        usage = snap.usage
+        codexUsage = snap.codexUsage
+        geminiUsage = snap.geminiUsage
+        fetchError = snap.fetchError
+        failureCount = snap.failureCount
+        nextFetchAllowed = snap.nextFetchAllowed
+        needsAction = snap.needsAction
+        desktopAccount = snap.desktopAccount
+    }
+
+    /// Persist the display state after each refresh cycle (post-prune, so
+    /// removed accounts don't linger). Best-effort — a failed write just
+    /// means the next launch starts empty, like before the cache existed.
+    private func saveUsageCache() {
+        try? UsageCache.save(.init(
+            usage: usage, codexUsage: codexUsage, geminiUsage: geminiUsage,
+            fetchError: fetchError, failureCount: failureCount,
+            nextFetchAllowed: nextFetchAllowed, needsAction: needsAction,
+            desktopAccount: desktopAccount))
     }
 
     /// Check GitHub Releases at most once a day; reflect the result in the menu.

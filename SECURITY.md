@@ -1,8 +1,9 @@
 # Security Policy
 
 PitStop reads and moves the credentials your Claude Code, Claude Desktop,
-OpenAI Codex, and Google Gemini logins use, so its security genuinely matters. Reports about
-anything that could expose or misuse those credentials are very welcome.
+OpenAI Codex, and Google Gemini logins use, so its security genuinely
+matters. Reports about anything that could expose or misuse those
+credentials are very welcome.
 
 ## Reporting a vulnerability
 

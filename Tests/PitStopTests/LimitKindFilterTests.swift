@@ -76,4 +76,16 @@ final class LimitKindFilterTests: XCTestCase {
         let u = codexUsage([("5h", 91), ("7d", 40)])
         XCTAssertNil(u.maxUtilization(kinds: [.perModel]))
     }
+
+    // MARK: Gemini
+
+    func testGeminiWindowsArePerModel() {
+        let u = Gemini.Usage(windows: [.init(label: "2.5 Pro", usedPercent: 88, resetsAt: nil)])
+        XCTAssertEqual(u.maxUtilization(kinds: [.perModel]), 88)
+        XCTAssertNil(u.maxUtilization(kinds: [.session, .weekly]))
+    }
+
+    func testGeminiNoWindowsIsNil() {
+        XCTAssertNil(Gemini.Usage(windows: []).maxUtilization(kinds: Set(LimitKind.allCases)))
+    }
 }

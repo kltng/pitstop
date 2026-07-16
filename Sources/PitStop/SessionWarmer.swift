@@ -29,4 +29,39 @@ enum SessionWarmer {
         }
         return true
     }
+
+    static let messagesURL = URL(string: "https://api.anthropic.com/v1/messages")!
+    /// [verify] Cheapest model the OAuth messages path accepts.
+    static let model = "claude-haiku-4-5-20251001"
+    /// [verify] OAuth-authenticated messages calls require Claude Code's
+    /// system prompt.
+    static let systemPrompt = "You are Claude Code, Anthropic's official CLI for Claude."
+
+    /// The 1-token session-starting request. Any 2xx counts as warmed;
+    /// the response body is discarded.
+    static func warmRequest(accessToken: String) -> URLRequest {
+        var req = URLRequest(url: messagesURL)
+        req.httpMethod = "POST"
+        req.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        req.setValue("oauth-2025-04-20", forHTTPHeaderField: "anthropic-beta")
+        req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        req.timeoutInterval = 15
+        req.httpBody = try? JSONSerialization.data(withJSONObject: [
+            "model": model,
+            "max_tokens": 1,
+            "system": systemPrompt,
+            "messages": [["role": "user", "content": "hi"]],
+        ])
+        return req
+    }
+
+    /// Send the warm request. Silent by design — failures just retry after
+    /// the cooldown; nothing is surfaced to the row display.
+    static func warm(accessToken: String) async -> Bool {
+        guard let (_, resp) = try? await URLSession.shared.data(
+            for: warmRequest(accessToken: accessToken)),
+            let http = resp as? HTTPURLResponse else { return false }
+        return (200 ..< 300).contains(http.statusCode)
+    }
 }

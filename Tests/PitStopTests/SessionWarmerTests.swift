@@ -47,4 +47,24 @@ final class SessionWarmerTests: XCTestCase {
         XCTAssertFalse(warm(now: now, lastAttempt: now.addingTimeInterval(-9 * 60)))
         XCTAssertTrue(warm(now: now, lastAttempt: now.addingTimeInterval(-11 * 60)))
     }
+
+    func testWarmRequestShape() throws {
+        let req = SessionWarmer.warmRequest(accessToken: "tok-123")
+        XCTAssertEqual(req.url?.absoluteString, "https://api.anthropic.com/v1/messages")
+        XCTAssertEqual(req.httpMethod, "POST")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Authorization"), "Bearer tok-123")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "anthropic-beta"), "oauth-2025-04-20")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "anthropic-version"), "2023-06-01")
+        XCTAssertEqual(req.value(forHTTPHeaderField: "Content-Type"), "application/json")
+
+        let body = try XCTUnwrap(req.httpBody)
+        let root = try XCTUnwrap(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+        XCTAssertEqual(root["model"] as? String, SessionWarmer.model)
+        XCTAssertEqual(root["max_tokens"] as? Int, 1)
+        XCTAssertEqual(root["system"] as? String, SessionWarmer.systemPrompt)
+        let messages = try XCTUnwrap(root["messages"] as? [[String: Any]])
+        XCTAssertEqual(messages.count, 1)
+        XCTAssertEqual(messages.first?["role"] as? String, "user")
+        XCTAssertEqual(messages.first?["content"] as? String, "hi")
+    }
 }

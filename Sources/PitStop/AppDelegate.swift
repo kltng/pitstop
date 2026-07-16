@@ -1498,6 +1498,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         codexUsage = codexUsage.filter { valid.contains($0.key) }
         geminiUsage = geminiUsage.filter { valid.contains($0.key) }
         fetchError = fetchError.filter { valid.contains($0.key) }
+        lastWarmAttempt = lastWarmAttempt.filter { valid.contains($0.key) }
         nextFetchAllowed = nextFetchAllowed.filter { valid.contains($0.key) }
         failureCount = failureCount.filter { valid.contains($0.key) }
         needsAction = needsAction.filter { valid.contains($0) }

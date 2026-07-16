@@ -29,6 +29,8 @@ final class SessionWarmerTests: XCTestCase {
         XCTAssertTrue(warm(now: at(23, 0), start: 1320, end: 240))
         XCTAssertTrue(warm(now: at(3, 0), start: 1320, end: 240))
         XCTAssertFalse(warm(now: at(12, 0), start: 1320, end: 240))
+        XCTAssertTrue(warm(now: at(22, 0), start: 1320, end: 240))   // start inclusive in wrap branch
+        XCTAssertFalse(warm(now: at(4, 0), start: 1320, end: 240))   // end exclusive in wrap branch
     }
 
     func testEmptyWindowNeverWarms() {
@@ -46,6 +48,7 @@ final class SessionWarmerTests: XCTestCase {
         let now = at(9, 0)
         XCTAssertFalse(warm(now: now, lastAttempt: now.addingTimeInterval(-9 * 60)))
         XCTAssertTrue(warm(now: now, lastAttempt: now.addingTimeInterval(-11 * 60)))
+        XCTAssertTrue(warm(now: now, lastAttempt: now.addingTimeInterval(-600)))  // exactly the cooldown = allowed
     }
 
     func testWarmRequestShape() throws {

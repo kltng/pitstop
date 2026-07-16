@@ -79,8 +79,9 @@ struct SettingsView: View {
     private func timeBinding(_ minutes: Binding<Int>) -> Binding<Date> {
         Binding(
             get: {
-                Calendar.current.date(byAdding: .minute, value: minutes.wrappedValue,
-                                      to: Calendar.current.startOfDay(for: Date())) ?? Date()
+                Calendar.current.date(bySettingHour: minutes.wrappedValue / 60,
+                                      minute: minutes.wrappedValue % 60, second: 0,
+                                      of: Date()) ?? Date()
             },
             set: {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: $0)

@@ -5,19 +5,19 @@
 # PitStop
 
 macOS menu bar app that tracks **usage limits** across your AI coding accounts
-— **Claude Code**, **Claude Desktop**, and **OpenAI Codex** — and lets you
-**switch accounts** with one click, so when one hits its rate limit you flip to
-another and your work keeps going.
+— **Claude Code**, **Claude Desktop**, **OpenAI Codex**, and **Google Gemini**
+(CLI + Antigravity) — and lets you **switch accounts** with one click, so when
+one hits its rate limit you flip to another and your work keeps going.
 
 <p align="center">
-  <img src="docs/menu.png" width="465" alt="PitStop menu grouped into Claude and Codex sections, each with color-coded usage bars">
+  <img src="docs/menu.png" width="465" alt="PitStop menu grouped into Claude, Codex, and Gemini sections, each with color-coded usage bars">
 </p>
 
 Accounts are grouped into a section per provider — **Claude**, **Codex**, and
-whatever comes next. Within each section the live account is marked with a
+**Gemini**. Within each section the live account is marked with a
 coral dot and listed first, then the rest by headroom (emptiest next — the one
 you'd switch to). Hovering a switchable row flips its plan chip into a coral
-**Switch** pill. A small tag on each row names the surface — **Code**,
+**Switch** pill. A small tag on each row names the surface — e.g. **Code**,
 **Desktop**, or **Code · Desktop** — so you can tell a switchable CLI account
 from a read-only Desktop one at a glance. The menu bar shows the active Claude
 Code account's binding limit, color-coded.
@@ -33,6 +33,11 @@ What shows up where:
   PitStop snapshots per account and swaps the same way it swaps the Claude
   Code credential. Each plan's rate-limit windows render as bars just like
   Claude's 5-hour and weekly limits.
+- **Google Gemini** accounts are switchable as well. The `gemini` CLI and the
+  Antigravity editor authenticate the same Google account, so they merge into
+  one row — tagged **CLI**, **Antigravity**, or **CLI · Antigravity** — with a
+  bar for the most-used model's daily quota and a compact line for the
+  runners-up.
 
 ## Quickstart
 
@@ -42,7 +47,7 @@ run shell commands) on the target Mac:
 ```text
 Install and set up PitStop (https://github.com/Livin21/pitstop), a macOS
 menu bar app that tracks usage limits and switches accounts across Claude
-Code, Claude Desktop, and OpenAI Codex, on this Mac.
+Code, Claude Desktop, OpenAI Codex, and Google Gemini, on this Mac.
 
 1. Verify requirements: macOS 26+, Xcode Command Line Tools
    (xcode-select --install), and Claude Code installed and logged in.
@@ -63,10 +68,12 @@ Code, Claude Desktop, and OpenAI Codex, on this Mac.
    sign in with the other account — PitStop saves it within 2 minutes
    (or via "Save Current Account" in the menu). I'll also click "Allow"
    on the notification prompt the first time it warns about usage.
-6. If I also use OpenAI Codex or the Claude Desktop app, tell me they're
-   detected automatically and show up in their own menu sections — Codex
-   accounts are switchable like Claude Code (it reads ~/.codex/auth.json,
-   no keychain grant), Claude Desktop is read-only.
+6. If I also use OpenAI Codex, Google Gemini (CLI or Antigravity), or the
+   Claude Desktop app, tell me they're detected automatically and show up
+   in their own menu sections — Codex and Gemini accounts are switchable
+   like Claude Code (Codex reads ~/.codex/auth.json with no prompt; Gemini
+   reads ~/.gemini files, and Antigravity's keychain item is one more
+   one-time Always Allow grant), Claude Desktop is read-only.
 ```
 
 Or set it up manually:
@@ -91,12 +98,16 @@ Or set it up manually:
   exponential backoff honoring `Retry-After` when Anthropic rate-limits,
   retrying as soon as the backoff window expires; the last good numbers
   stay visible (rows note "showing … data"; the menu bar dims) during
-  outages.
+  outages — and across relaunches: display state (bars, errors, retry
+  backoffs) persists to `~/.config/pitstop/usage-cache.json`, so a launch
+  that lands mid-rate-limit shows your last-known numbers instead of a
+  blank menu.
 - **Menu bar number** is, by default, the active Claude Code account's
-  binding constraint — `max(5-hour, weekly)` utilization — with a warning dot
-  from 75 % (🟠) and 90 % (🔴). (Dots rather than colored text: macOS repaints
-  menu bar items in a single wallpaper-matched ink, and emoji are the only
-  glyphs that keep their color.) **Settings** customizes it: what it shows
+  binding constraint — `max(5-hour, weekly, per-model)` utilization (per-model
+  weekly limits like Fable render as their own labelled bars) — with a warning
+  dot from 75 % (🟠) and 90 % (🔴). (Dots rather than colored text: macOS
+  repaints menu bar items in a single wallpaper-matched ink, and emoji are the
+  only glyphs that keep their color.) **Settings** customizes it: what it shows
   (icon & percent / icon only / percent only), which account it tracks (the
   active Claude Code account, or the most-used account across any provider),
   and which limit drives the number (highest / 5-hour / weekly).
@@ -118,8 +129,9 @@ Or set it up manually:
 - **Notifications** fire when the active account crosses 80 % and 95 %,
   with the reset time, so you can switch before sessions stall.
 - **Settings** (⌘, from the menu) is a small window holding all preferences —
-  the menu-bar options above, auto-switch, the projection toggle, and launch
-  at login.
+  the menu-bar options above, auto-switch and its per-limit trigger
+  checkboxes, session warming and its hours, the projection toggle, and
+  launch at login.
 - **Accounts** are snapshots of the Claude Code credential blob:
   - secrets live in the **keychain** (service `PitStop-profile`, one item
     per account email) — never written to disk;
@@ -148,6 +160,20 @@ Or set it up manually:
   fresh itself. The CLI and app share one login, so each Codex account is one
   row. Per-account state is keyed by provider, so a Claude account and a Codex
   account that happen to share an email stay distinct rows.
+- **Google Gemini** covers two surfaces with one Google login: the `gemini`
+  CLI keeps its OAuth credential in `~/.gemini/oauth_creds.json` (active
+  account in `google_accounts.json`), Antigravity keeps a go-keyring blob in
+  the keychain (item `gemini`/`antigravity`). Plan (and the Code Assist
+  project) come from Google's Code Assist backend
+  (`cloudcode-pa.googleapis.com` — `loadCodeAssist`); identity is the
+  active email in `google_accounts.json` (falling back to the CLI blob's
+  `id_token`); usage comes from `retrieveUserQuota`, each model's remaining
+  daily quota. Switching mirrors the other providers: snapshots live in the
+  keychain (services `PitStop-gemini-cli` / `PitStop-gemini-antigravity`,
+  one item per email), and a switch writes the chosen account's blobs back
+  into the CLI files and/or the Antigravity keychain item — whichever
+  surfaces that account was saved from. Inactive snapshots are kept fresh
+  via Google's OAuth refresh grant, like Codex's.
 - **All keychain access goes through `/usr/bin/security`** — the same CLI
   Claude Code shells out to. One "Always Allow" grant (enter the keychain
   password when prompted) covers both apps and survives PitStop rebuilds,
@@ -174,15 +200,17 @@ it once while PitStop runs:
 
 1. PitStop auto-saves whatever account is currently live.
 2. Sign in with the **other** account — Claude Code: run `/login`; Codex: run
-   `codex` and sign in (the CLI and the Codex app share this login).
+   `codex` and sign in (the CLI and the Codex app share this login); Gemini:
+   sign in from the `gemini` CLI or Antigravity (both share the Google login).
 3. PitStop notices it on the next refresh and saves it too (for Claude you can
    also click **Save Current Account**).
 4. Both accounts now appear in the menu — click either to switch.
 
 ## What switching means for running sessions
 
-After a switch, the live credential (Claude Code's keychain item, or Codex's
-`~/.codex/auth.json`) points at the new account:
+After a switch, the live credential (Claude Code's keychain item, Codex's
+`~/.codex/auth.json`, or Gemini's `~/.gemini` files / `gemini` keychain item)
+points at the new account:
 
 - **New sessions** use the new account immediately.
 - **Running Claude Code sessions** keep working on the old in-memory token
@@ -191,6 +219,9 @@ After a switch, the live credential (Claude Code's keychain item, or Codex's
 - **The Codex app**, if open, may need a quit-and-reopen to pick up the swap
   (and can overwrite `auth.json` from memory while running — switch Codex with
   the app closed for a clean result).
+- **Gemini** surfaces re-read their credential stores on their own cadence —
+  new CLI sessions pick the swap up immediately; a running Antigravity may
+  need a restart to notice.
 
 ## Development
 
@@ -252,6 +283,11 @@ participating you agree to the [Code of Conduct](CODE_OF_CONDUCT.md).
   file); saving/refreshing snapshots creates `PitStop-codex` keychain items the
   same silent way as the Claude ones. It reads ChatGPT's unofficial backend and
   OAuth endpoints; if those change, update `Codex.swift`. Not installed or not
+  signed in → nothing changes.
+- **Gemini** reads the CLI's plain credential files (no prompt) and
+  Antigravity's `gemini` keychain item — one more one-time **Always Allow**
+  grant, same as the others. It talks to Google's unofficial Code Assist
+  endpoints; if those change, update `Gemini.swift`. Not installed or not
   signed in → nothing changes.
 - The usage endpoint and refresh flow are the same unofficial OAuth surface
   Claude Code itself uses; if Anthropic changes them, update `UsageAPI.swift`.

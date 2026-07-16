@@ -1,8 +1,9 @@
 # Security Policy
 
-PitStop reads and moves the credentials your Claude Code, Claude Desktop, and
-OpenAI Codex logins use, so its security genuinely matters. Reports about
-anything that could expose or misuse those credentials are very welcome.
+PitStop reads and moves the credentials your Claude Code, Claude Desktop,
+OpenAI Codex, and Google Gemini logins use, so its security genuinely
+matters. Reports about anything that could expose or misuse those
+credentials are very welcome.
 
 ## Reporting a vulnerability
 
@@ -25,12 +26,17 @@ Helpful to include:
 
 By design, PitStop:
 
-- reads the Claude Code OAuth credential and `~/.codex/auth.json`, decrypts
-  Claude Desktop's `sessionKey` cookie, and stores per-account snapshots in
-  the macOS keychain (services `PitStop-profile` and `PitStop-codex`);
+- reads the Claude Code OAuth credential, `~/.codex/auth.json`, the Gemini
+  CLI's `~/.gemini/oauth_creds.json`, and Antigravity's `gemini` keychain
+  item, decrypts Claude Desktop's `sessionKey` cookie, and stores
+  per-account snapshots in the macOS keychain (services `PitStop-profile`,
+  `PitStop-codex`, `PitStop-gemini-cli`, and `PitStop-gemini-antigravity`);
 - writes the live credential back into place when you switch accounts;
-- calls the same unofficial Anthropic / ChatGPT OAuth and usage endpoints the
-  official apps use.
+- calls the same unofficial Anthropic / ChatGPT / Google Code Assist OAuth
+  and usage endpoints the official apps use;
+- keeps a non-secret display cache at `~/.config/pitstop/usage-cache.json`
+  (usage percentages, reset times, account emails — never tokens), so the
+  menu isn't blank after a rate-limited relaunch.
 
 Known, **accepted** trade-offs (documented in the README):
 

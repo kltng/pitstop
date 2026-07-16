@@ -12,6 +12,9 @@ struct SettingsView: View {
     @AppStorage("menuBarSource") private var menuBarSource: MenuBarSource = .activeClaudeCode
     @AppStorage("autoSwitchEnabled") private var autoSwitch = false
     @AppStorage("autoSwitchThreshold") private var threshold = 90
+    @AppStorage("autoSwitchOnSession") private var triggerSession = true
+    @AppStorage("autoSwitchOnWeekly") private var triggerWeekly = true
+    @AppStorage("autoSwitchOnPerModel") private var triggerPerModel = true
     @AppStorage("showProjection") private var showProjection = true
 
     var body: some View {
@@ -33,8 +36,11 @@ struct SettingsView: View {
                 Toggle("Auto-switch when an account runs low", isOn: $autoSwitch)
                 if autoSwitch {
                     Stepper("Switch at \(threshold)% used", value: $threshold, in: 50 ... 99, step: 5)
+                    Toggle("Trigger on the 5-hour limit", isOn: $triggerSession)
+                    Toggle("Trigger on weekly limits (7d / 30d)", isOn: $triggerWeekly)
+                    Toggle("Trigger on per-model limits (Fable, Gemini quotas)", isOn: $triggerPerModel)
                 }
-                Text("Flips the live account of each switchable provider — Claude Code, Codex, and Gemini (CLI + Antigravity) — to the one with the most headroom, and notifies you. Claude Desktop is read-only, so it's left alone.")
+                Text("Flips the live account of each switchable provider — Claude Code, Codex, and Gemini (CLI + Antigravity) — to the one with the most headroom, and notifies you. Claude Desktop is read-only, so it's left alone. Gemini's limits are all per-model, so unchecking per-model limits turns Gemini auto-switch off; unchecking all three turns auto-switch off everywhere.")
                     .font(.caption).foregroundStyle(.secondary)
             }
 

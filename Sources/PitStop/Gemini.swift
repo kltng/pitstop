@@ -168,6 +168,14 @@ enum Gemini {
         var windows: [Window]
         var fetchedAt = Date()
         var maxUtilization: Double { windows.map(\.usedPercent).max() ?? 0 }
+
+        /// Auto-switch's filtered view. Every Gemini window is a per-model
+        /// daily quota, so only the perModel kind exposes them — with it
+        /// unchecked, Gemini auto-switch never triggers and Gemini accounts
+        /// are never targets.
+        func maxUtilization(kinds: Set<LimitKind>) -> Double? {
+            kinds.contains(.perModel) ? windows.map(\.usedPercent).max() : nil
+        }
     }
 
     /// Parse a retrieveUserQuota response into per-model windows. Buckets whose

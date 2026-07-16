@@ -34,6 +34,17 @@ struct UsageReport {
         }
         return best
     }
+
+    /// Auto-switch's filtered view: the max utilization over windows of the
+    /// enabled kinds that report a number, or nil when none does — callers
+    /// treat nil as "no trustworthy data" (never a trigger, never a target).
+    func maxUtilization(kinds: Set<LimitKind>) -> Double? {
+        var values: [Double] = []
+        if kinds.contains(.session), let u = fiveHour?.utilization { values.append(u) }
+        if kinds.contains(.weekly), let u = sevenDay?.utilization { values.append(u) }
+        if kinds.contains(.perModel) { values += scoped.compactMap(\.window.utilization) }
+        return values.max()
+    }
 }
 
 enum UsageAPI {

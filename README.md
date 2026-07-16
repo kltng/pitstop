@@ -101,10 +101,12 @@ Or set it up manually:
   active Claude Code account, or the most-used account across any provider),
   and which limit drives the number (highest / 5-hour / weekly).
 - **Auto-switch** (off by default) flips a switchable provider's live account
-  — Claude Code or Codex — to the saved account with the most headroom once
-  the live one crosses a configurable threshold, and notifies you. It only
-  moves onto accounts with trustworthy fresh data, and a per-provider cooldown
-  prevents flapping; Desktop is read-only and left alone.
+  — Claude Code, Codex, or Gemini — to the saved account with the most
+  headroom once the live one crosses a configurable threshold, and notifies
+  you. Checkboxes pick which limit kinds count — 5-hour, weekly, per-model
+  (Fable, Gemini quotas) — for both the trigger and the target ranking. It
+  only moves onto accounts with trustworthy fresh data, and a per-provider
+  cooldown prevents flapping; Desktop is read-only and left alone.
 - **Time-to-limit projection** (on by default) samples usage over time and,
   when a window is trending toward full *before* it resets, shows
   "↗ on pace to hit limit ~3:40 PM" on the row.

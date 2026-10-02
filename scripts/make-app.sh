@@ -7,6 +7,30 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
+# PitStop's SwiftUI views need the SwiftUIMacros compiler plugin, which ships
+# with Xcode but not with the standalone Command Line Tools. If the active
+# developer dir lacks it (and DEVELOPER_DIR isn't already set), build with an
+# installed Xcode instead — otherwise swift build dies with an opaque
+# "Unknown error parsing property list" / "plugin for module 'SwiftUIMacros'
+# not found".
+has_swiftui_macros() {
+  [[ -e "$1/Platforms/MacOSX.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib" ]]
+}
+if [[ -z "${DEVELOPER_DIR:-}" ]] && ! has_swiftui_macros "$(xcode-select -p 2>/dev/null)"; then
+  for xcode in /Applications/Xcode.app /Applications/Xcode*.app(N) \
+      ${(f)"$(mdfind 'kMDItemCFBundleIdentifier == "com.apple.dt.Xcode"' 2>/dev/null)"}; do
+    if has_swiftui_macros "$xcode/Contents/Developer"; then
+      export DEVELOPER_DIR="$xcode/Contents/Developer"
+      echo "Building with $xcode (the active Command Line Tools lack SwiftUI macros)"
+      break
+    fi
+  done
+  if [[ -z "${DEVELOPER_DIR:-}" ]]; then
+    echo "error: building PitStop needs Xcode (for SwiftUI macros); install it from the App Store." >&2
+    exit 1
+  fi
+fi
+
 swift build -c release
 
 APP="/Applications/PitStop.app"

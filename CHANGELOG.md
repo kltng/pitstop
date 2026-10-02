@@ -5,6 +5,12 @@ All notable changes to PitStop are documented here. The format is based on
 appear on [GitHub Releases](https://github.com/Livin21/pitstop/releases).
 
 ## [Unreleased]
+### Fixed
+- Rebuild-from-source updates (and `scripts/make-app.sh`) no longer fail
+  with "Unknown error parsing property list" when the active developer
+  directory is the Command Line Tools: those lack the SwiftUI macro plugin,
+  so the script now builds with an installed Xcode instead.
+
 ### Security
 - Credential files PitStop restores (`~/.codex/auth.json`,
   `~/.gemini/oauth_creds.json`) are now created mode 600 from birth instead

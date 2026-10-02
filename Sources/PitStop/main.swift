@@ -20,18 +20,23 @@ if CommandLine.arguments.contains("--check") {
             let isActive = profile.email == active
             print("\n\(isActive ? "●" : "○") \(profile.email)  [\(profile.planLabel)]")
             do {
-                guard let blob = try await store.blob(for: profile.email, isActive: isActive) else {
+                guard let stored = try await store.blob(for: profile.email, isActive: isActive) else {
                     print("   no stored credentials")
                     continue
                 }
-                var creds = try CredentialBlob.parse(blob)
+                if isActive && stored.source == .saved {
+                    print("   note: the live keychain item isn't this account's —")
+                    print("   using the saved snapshot (see: is Claude Desktop signed in elsewhere?)")
+                }
+                var creds = try CredentialBlob.parse(stored.data)
                 if creds.isExpired, let rt = creds.refreshToken {
                     print("   token expired — refreshing…")
                     let fresh = try await UsageAPI.refresh(refreshToken: rt)
                     let patched = try CredentialBlob.patching(
-                        blob, accessToken: fresh.accessToken,
+                        stored.data, accessToken: fresh.accessToken,
                         refreshToken: fresh.refreshToken, expiresAtMs: fresh.expiresAtMs)
-                    try await store.storeRefreshedBlob(patched, email: profile.email, isActive: isActive)
+                    try await store.storeRefreshedBlob(patched, email: profile.email,
+                                                       source: stored.source)
                     creds.accessToken = fresh.accessToken
                 }
                 let report = try await UsageAPI.fetchUsage(accessToken: creds.accessToken)
@@ -93,6 +98,25 @@ if CommandLine.arguments.contains("--check") {
                     if usage.windows.isEmpty { print("   (no usage windows reported)") }
                     for w in usage.windows {
                         print("   \(w.label.isEmpty ? "window" : w.label)  \(Format.percent(w.usedPercent))  \(Format.reset(w.resetsAt))")
+                    }
+                } catch {
+                    print("   error: \(error.localizedDescription)")
+                }
+            }
+        }
+
+        // OpenCode Go (read-only quota; auth is provider-scoped, not account-scoped).
+        if OpenCode.isInstalled {
+            print("\n\(OpenCode.accountName)")
+            if !OpenCode.isPresent {
+                print("   installed but not signed in with a Go subscription")
+            } else {
+                do {
+                    let usage = try await OpenCode.liveUsage()
+                    if usage.useBalance { print("   balance-funded") }
+                    if usage.windows.isEmpty { print("   (no quota windows reported)") }
+                    for window in usage.windows {
+                        print("   \(window.label)  \(Format.percent(window.usedPercent))  \(Format.reset(window.resetsAt))")
                     }
                 } catch {
                     print("   error: \(error.localizedDescription)")

@@ -82,7 +82,13 @@ final class ProfileStore {
         var errorDescription: String? {
             switch self {
             case .mismatch(let owner, let email):
-                return "Skipped saving \(email) — the logged-in credentials belong to \(owner)"
+                return """
+                    The live Claude login belongs to \(owner), but ~/.claude.json \
+                    still names \(email) — saving that pair would file \(owner)'s \
+                    credentials under \(email). Run `claude` and use /login to sign \
+                    in as the account you want live, then try again. Claude Desktop \
+                    bundles its own Claude Code and can take the login over.
+                    """
             case .unverifiable(let why):
                 return "Couldn't confirm the logged-in account's identity: \(why)"
             }
@@ -147,6 +153,13 @@ final class ProfileStore {
                                               ofItemAtPath: directory.path)
     }
 
+    /// Where a profile's credentials came from. The caller has to write a
+    /// rotation back to the same place it read from: a refresh of the live
+    /// item belongs in the live item, a refresh of a saved snapshot must stay
+    /// in the snapshot — writing that one live would hand Claude Code's
+    /// session to an account the user didn't switch to.
+    enum BlobSource: Equatable { case live, saved }
+
     /// What the once-per-launch identity audit found for a profile.
     enum AuditOutcome: Equatable {
         case verified
@@ -161,6 +174,10 @@ final class ProfileStore {
     private let deps: Deps
     /// Emails whose stored credentials passed this launch's identity audit.
     private var auditedEmails: Set<String> = []
+    /// The last owner check performed on the live credential item, cached
+    /// against the exact bytes it ran on. Any rewrite of the item changes the
+    /// bytes and invalidates it.
+    private var verifiedLive: (blob: Data, owner: String)?
 
     init(deps: Deps = Deps()) {
         self.deps = deps
@@ -239,6 +256,10 @@ final class ProfileStore {
         } catch {
             throw CaptureError.unverifiable(error.localizedDescription)
         }
+        // Record the answer even when it's a mismatch: `blob(for:isActive:)`
+        // asks the same question about the same bytes moments later, and a
+        // crossed pair would otherwise re-verify on every refresh.
+        verifiedLive = (blobToStore, owner)
         guard owner.caseInsensitiveCompare(email) == .orderedSame else {
             throw CaptureError.mismatch(tokenOwner: owner, configEmail: email)
         }
@@ -319,21 +340,64 @@ final class ProfileStore {
         return .verified
     }
 
-    /// The credential blob to use for a profile — the live item for the
-    /// active account (Claude Code keeps that one fresh), the saved copy
-    /// otherwise.
-    func blob(for email: String, isActive: Bool) async throws -> Data? {
-        if isActive, let live = try await Keychain.read(service: CredentialBlob.liveService) {
-            return live
+    /// The credential blob to use for a profile, and where it came from.
+    ///
+    /// For the account `~/.claude.json` names as active this prefers the live
+    /// keychain item — Claude Code keeps that one fresh — but only once the
+    /// live blob is known to belong to `email`. The identity file and the
+    /// keychain are separate stores written at different moments, and Claude
+    /// Desktop ships its own copy of Claude Code that rewrites the very same
+    /// live item, so the two genuinely disagree in practice. Using a live blob
+    /// that belongs to somebody else would report their usage on this row and,
+    /// on the next token rotation, overwrite this profile's saved credentials
+    /// with theirs — which the identity audit then deletes as poisoned. When
+    /// ownership isn't established the saved snapshot is used instead, which
+    /// costs only freshness.
+    func blob(for email: String, isActive: Bool) async throws -> (data: Data, source: BlobSource)? {
+        let saved = try await deps.readProfileBlob(email)
+        if isActive, let live = try await deps.readLive(),
+           await liveBelongs(to: email, blob: live, saved: saved) {
+            return (live, .live)
         }
-        return try await Keychain.read(service: CredentialBlob.profileService, account: email)
+        guard let saved else { return nil }
+        return (saved, .saved)
     }
 
-    /// Persist a blob whose tokens we refreshed ourselves.
-    func storeRefreshedBlob(_ data: Data, email: String, isActive: Bool) async throws {
-        try await Keychain.upsert(service: CredentialBlob.profileService, account: email, data: data)
-        if isActive {
-            try await Keychain.upsertLive(service: CredentialBlob.liveService, data: data)
+    /// Whether the live credential item's token belongs to `email`.
+    ///
+    /// Two cheap answers come first: bytes identical to the snapshot already
+    /// filed under this email (the steady state — nothing has touched the live
+    /// item since the last capture), then the cached result of a previous
+    /// check on these same bytes. Only a live item that is genuinely new costs
+    /// an HTTP call, and its answer is cached against those bytes, so a
+    /// disagreement doesn't re-verify every refresh.
+    ///
+    /// An unverifiable token — offline, or expired and so unusable for the
+    /// identity call — answers false. Falling back to the saved copy is the
+    /// safe direction: `captureCurrent` refreshes and re-verifies an expired
+    /// live item at the top of the next cycle anyway.
+    private func liveBelongs(to email: String, blob: Data, saved: Data?) async -> Bool {
+        if let saved, saved == blob { return true }
+        if let cached = verifiedLive, cached.blob == blob {
+            return cached.owner.caseInsensitiveCompare(email) == .orderedSame
+        }
+        guard let creds = try? CredentialBlob.parse(blob), !creds.isExpired,
+              let owner = try? await deps.verifyOwner(creds.accessToken) else { return false }
+        verifiedLive = (blob, owner)
+        return owner.caseInsensitiveCompare(email) == .orderedSame
+    }
+
+    /// Persist a blob whose tokens we refreshed ourselves, back to wherever
+    /// the blob came from. The saved snapshot always tracks the rotation; the
+    /// live item is only rewritten when it was the source, so a refresh of an
+    /// inactive account can't displace the live session.
+    func storeRefreshedBlob(_ data: Data, email: String, source: BlobSource) async throws {
+        try await deps.writeProfileBlob(email, data)
+        if source == .live {
+            try await deps.writeLive(data)
+            // The rotation we just wrote is still this account's, so carry the
+            // verification across rather than paying for it again next cycle.
+            verifiedLive = (data, email)
         }
     }
 }

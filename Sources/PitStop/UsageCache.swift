@@ -21,6 +21,7 @@ enum UsageCache {
         var usage: [String: UsageReport] = [:]
         var codexUsage: [String: Codex.Usage] = [:]
         var geminiUsage: [String: Gemini.Usage] = [:]
+        var openCodeUsage: [String: OpenCode.Usage] = [:]
         var fetchError: [String: String] = [:]
         var failureCount: [String: Int] = [:]
         var nextFetchAllowed: [String: Date] = [:]
@@ -44,9 +45,37 @@ enum UsageCache {
         snap.usage = snap.usage.filter { now.timeIntervalSince($0.value.fetchedAt) < maxAge }
         snap.codexUsage = snap.codexUsage.filter { now.timeIntervalSince($0.value.fetchedAt) < maxAge }
         snap.geminiUsage = snap.geminiUsage.filter { now.timeIntervalSince($0.value.fetchedAt) < maxAge }
+        snap.openCodeUsage = snap.openCodeUsage.filter { now.timeIntervalSince($0.value.fetchedAt) < maxAge }
         snap.nextFetchAllowed = snap.nextFetchAllowed.mapValues {
             min($0, now.addingTimeInterval(maxBackoff))
         }
         return snap
+    }
+}
+
+extension UsageCache.Snapshot {
+    /// Everything but `openCodeUsage` decodes strictly, exactly as synthesized
+    /// `Codable` did: a snapshot missing one of those keys is damaged, and
+    /// `load` returning nil for it (a clean start) beats half-restoring
+    /// backoff gates with no usage or error to explain them.
+    ///
+    /// `openCodeUsage` is the one exception — caches written before OpenCode
+    /// support existed have no such key and are otherwise perfectly good.
+    /// Declaring only `init(from:)`, and doing it in an extension, keeps the
+    /// memberwise initializer and the synthesized `encode(to:)`, so a future
+    /// field can't be silently left out of what gets written.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        usage = try container.decode([String: UsageReport].self, forKey: .usage)
+        codexUsage = try container.decode([String: Codex.Usage].self, forKey: .codexUsage)
+        geminiUsage = try container.decode([String: Gemini.Usage].self, forKey: .geminiUsage)
+        openCodeUsage = try container.decodeIfPresent([String: OpenCode.Usage].self,
+                                                      forKey: .openCodeUsage) ?? [:]
+        fetchError = try container.decode([String: String].self, forKey: .fetchError)
+        failureCount = try container.decode([String: Int].self, forKey: .failureCount)
+        nextFetchAllowed = try container.decode([String: Date].self, forKey: .nextFetchAllowed)
+        needsAction = try container.decode(Set<String>.self, forKey: .needsAction)
+        desktopAccount = try container.decodeIfPresent(ClaudeDesktop.Account.self,
+                                                       forKey: .desktopAccount)
     }
 }

@@ -3,9 +3,23 @@ import CommonCrypto
 
 /// Reads the account Claude Desktop is logged into and its usage.
 ///
-/// Claude Desktop is an Electron app that signs into **claude.ai** with a
-/// cookie session, not the OAuth-token-in-keychain flow Claude Code uses. So
-/// PitStop can observe it but not switch it — these accounts show up read-only.
+/// The *chat* side of Claude Desktop is an Electron app that signs into
+/// **claude.ai** with a cookie session rather than the OAuth-token-in-keychain
+/// flow Claude Code uses, and that session is what this file reads. PitStop
+/// can observe it but not switch it, so these accounts show up read-only.
+///
+/// Careful: read-only here describes *this file*, not the Desktop app. Claude
+/// Desktop also ships a full copy of Claude Code under
+/// `~/Library/Application Support/Claude/claude-code/<version>/`, and that
+/// binary computes its keychain service as
+/// `"Claude Code" + OAUTH_FILE_SUFFIX + "-credentials" + configDirHash` with
+/// account `$USER` — which, absent a `CLAUDE_CONFIG_DIR` override, is exactly
+/// the `Claude Code-credentials` item PitStop drives, written in place with
+/// `security add-generic-password -U`. It shares `~/.claude.json` too. So the
+/// live Claude credential can change owner without PitStop or the CLI doing
+/// anything, and neither store can be trusted to describe the other. See
+/// `ProfileStore.blob(for:isActive:)`, which verifies ownership before
+/// treating the live item as a given account's.
 ///
 /// The pieces:
 ///  - The `sessionKey` cookie lives in `~/Library/Application Support/Claude/

@@ -80,6 +80,20 @@ final class ProfileStoreCaptureTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: h.file.path))
     }
 
+    /// The mismatch is the one capture failure the user has to act on, and it
+    /// also blocks switching (switchTo snapshots first). The message has to
+    /// name both accounts and the way out, on one line — it surfaces in an
+    /// NSAlert and in `--check`'s "capture failed:" line.
+    func testMismatchMessageNamesBothAccountsAndTheFix() {
+        let text = ProfileStore.CaptureError
+            .mismatch(tokenOwner: "b@x.com", configEmail: "a@x.com")
+            .localizedDescription
+        XCTAssertTrue(text.contains("b@x.com"), text)
+        XCTAssertTrue(text.contains("a@x.com"), text)
+        XCTAssertTrue(text.contains("/login"), text)
+        XCTAssertFalse(text.contains("\n"), "must stay one line: \(text)")
+    }
+
     func testCaptureFilesVerifiedBlob() async throws {
         let h = CaptureHarness()
         h.live = blob(access: "at-a")
@@ -154,6 +168,178 @@ final class ProfileStoreCaptureTests: XCTestCase {
         }
         XCTAssertTrue(store.profiles.isEmpty)
         XCTAssertTrue(h.savedBlobs.isEmpty)
+    }
+}
+
+/// Claude Desktop ships its own Claude Code, which writes the same
+/// `Claude Code-credentials` keychain item the CLI uses. So the live item can
+/// stop belonging to the account `~/.claude.json` still names as active, and
+/// PitStop must not treat it as that account's — reporting the wrong usage is
+/// the mild outcome; overwriting the saved snapshot with the other account's
+/// tokens (which the audit then deletes) loses the credentials outright.
+final class ProfileStoreLiveOwnershipTests: XCTestCase {
+
+    /// The steady state: the live item is byte-identical to the snapshot filed
+    /// under this email, which settles ownership without an HTTP call.
+    func testUnchangedLiveItemIsUsedWithoutVerifying() async throws {
+        let h = CaptureHarness()
+        h.live = blob(access: "at-a")
+        h.savedBlobs["a@x.com"] = h.live
+        let store = h.makeStore()
+
+        let stored = try await store.blob(for: "a@x.com", isActive: true)
+
+        XCTAssertEqual(stored?.data, h.live)
+        XCTAssertEqual(stored?.source, .live)
+        XCTAssertEqual(h.verifyCalls, 0)
+    }
+
+    /// The reported bug: Desktop's embedded Claude Code replaced the live item
+    /// while ~/.claude.json still named the old account.
+    func testForeignLiveItemFallsBackToSavedSnapshot() async throws {
+        let h = CaptureHarness()
+        h.live = blob(access: "at-b")               // Desktop's account
+        h.savedBlobs["a@x.com"] = blob(access: "at-a")
+        h.owners["at-b"] = "b@x.com"
+        let store = h.makeStore()
+
+        let stored = try await store.blob(for: "a@x.com", isActive: true)
+
+        XCTAssertEqual(stored?.source, .saved)
+        XCTAssertEqual(stored?.data, h.savedBlobs["a@x.com"])
+        XCTAssertEqual(h.verifyCalls, 1)
+    }
+
+    /// The data loss itself: refreshing that fallback must stay in the
+    /// snapshot and never be written back over the live item.
+    func testRefreshOfFallbackNeverTouchesLiveItem() async throws {
+        let h = CaptureHarness()
+        let desktopBlob = blob(access: "at-b")
+        h.live = desktopBlob
+        h.savedBlobs["a@x.com"] = blob(access: "at-a")
+        h.owners["at-b"] = "b@x.com"
+        let store = h.makeStore()
+
+        let fetched = try await store.blob(for: "a@x.com", isActive: true)
+        let stored = try XCTUnwrap(fetched)
+        let rotated = blob(access: "at-a2")
+        try await store.storeRefreshedBlob(rotated, email: "a@x.com", source: stored.source)
+
+        XCTAssertEqual(h.savedBlobs["a@x.com"], rotated)
+        XCTAssertTrue(h.liveWrites.isEmpty)
+        XCTAssertEqual(h.live, desktopBlob)   // still Desktop's, untouched
+    }
+
+    /// A live item this account does own — e.g. a `claude /login` that landed
+    /// after the last capture — is verified once and then cached by its bytes.
+    func testNewLiveItemIsVerifiedOnceThenCached() async throws {
+        let h = CaptureHarness()
+        h.live = blob(access: "at-a2")
+        h.savedBlobs["a@x.com"] = blob(access: "at-a")
+        h.owners["at-a2"] = "A@X.com"               // case-insensitive match
+        let store = h.makeStore()
+
+        for _ in 0..<3 {
+            let stored = try await store.blob(for: "a@x.com", isActive: true)
+            XCTAssertEqual(stored?.source, .live)
+        }
+        XCTAssertEqual(h.verifyCalls, 1)
+    }
+
+    /// A disagreement is cached too — otherwise every refresh pays for the
+    /// same answer for as long as the mismatch lasts.
+    func testForeignLiveItemIsVerifiedOnlyOnce() async throws {
+        let h = CaptureHarness()
+        h.live = blob(access: "at-b")
+        h.savedBlobs["a@x.com"] = blob(access: "at-a")
+        h.owners["at-b"] = "b@x.com"
+        let store = h.makeStore()
+
+        for _ in 0..<3 {
+            let stored = try await store.blob(for: "a@x.com", isActive: true)
+            XCTAssertEqual(stored?.source, .saved)
+        }
+        XCTAssertEqual(h.verifyCalls, 1)
+    }
+
+    /// captureCurrent asks the same question about the same bytes moments
+    /// earlier; its answer should carry over rather than be paid for twice.
+    func testCaptureVerificationPrimesTheCache() async throws {
+        let h = CaptureHarness()
+        h.live = blob(access: "at-a")
+        h.account = ["emailAddress": "a@x.com"]
+        h.owners["at-a"] = "a@x.com"
+        let store = h.makeStore()
+
+        _ = try await store.captureCurrent()
+        XCTAssertEqual(h.verifyCalls, 1)
+        // captureCurrent filed the blob, so the byte-equality path settles this
+        // one anyway; drop the snapshot to force the cache to answer.
+        h.savedBlobs["a@x.com"] = nil
+
+        let stored = try await store.blob(for: "a@x.com", isActive: true)
+        XCTAssertEqual(stored?.source, .live)
+        XCTAssertEqual(h.verifyCalls, 1)
+    }
+
+    /// Offline, or a live token too expired to identify: prefer the snapshot.
+    /// captureCurrent refreshes and re-verifies the live item next cycle.
+    func testUnverifiableLiveItemFallsBackToSavedSnapshot() async throws {
+        let h = CaptureHarness()
+        h.live = blob(access: "at-?")
+        h.savedBlobs["a@x.com"] = blob(access: "at-a")
+        h.verifyError = URLError(.notConnectedToInternet)
+        let store = h.makeStore()
+
+        let offline = try await store.blob(for: "a@x.com", isActive: true)
+        XCTAssertEqual(offline?.source, .saved)
+
+        // An expired live token can't be identified at all, so it doesn't even
+        // reach the identity endpoint.
+        h.verifyError = nil
+        h.live = blob(access: "at-old", expiresAt: Date(timeIntervalSinceNow: -60))
+        h.owners["at-old"] = "a@x.com"
+        let store2 = h.makeStore()
+        let callsBefore = h.verifyCalls
+        let expired = try await store2.blob(for: "a@x.com", isActive: true)
+        XCTAssertEqual(expired?.source, .saved)
+        XCTAssertEqual(h.verifyCalls, callsBefore)
+    }
+
+    func testInactiveAccountAlwaysUsesItsSnapshot() async throws {
+        let h = CaptureHarness()
+        h.live = blob(access: "at-b")
+        h.savedBlobs["a@x.com"] = blob(access: "at-a")
+        let store = h.makeStore()
+
+        let stored = try await store.blob(for: "a@x.com", isActive: false)
+
+        XCTAssertEqual(stored?.source, .saved)
+        XCTAssertEqual(stored?.data, h.savedBlobs["a@x.com"])
+        XCTAssertEqual(h.verifyCalls, 0)
+    }
+
+    func testNoCredentialsAnywhereReturnsNil() async throws {
+        let h = CaptureHarness()
+        let store = h.makeStore()
+        let stored = try await store.blob(for: "a@x.com", isActive: true)
+        XCTAssertNil(stored)
+    }
+
+    /// A live-sourced rotation goes to both stores — that's how Claude Code's
+    /// own session survives PitStop refreshing its token.
+    func testRefreshOfLiveSourceWritesBothStores() async throws {
+        let h = CaptureHarness()
+        h.live = blob(access: "at-a")
+        h.savedBlobs["a@x.com"] = h.live
+        let store = h.makeStore()
+
+        let rotated = blob(access: "at-a2")
+        try await store.storeRefreshedBlob(rotated, email: "a@x.com", source: .live)
+
+        XCTAssertEqual(h.savedBlobs["a@x.com"], rotated)
+        XCTAssertEqual(h.liveWrites, [rotated])
+        XCTAssertEqual(h.live, rotated)
     }
 }
 

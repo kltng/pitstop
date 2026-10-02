@@ -21,6 +21,61 @@ appear on [GitHub Releases](https://github.com/Livin21/pitstop/releases).
 - SECURITY.md's threat-surface list now covers the Gemini CLI / Antigravity
   credential surfaces and the loopback OAuth re-login server.
 
+## [0.6.0] - 2026-09-07
+### Added
+- **OpenCode Go usage.** A fourth provider section, read-only: PitStop reads
+  the `opencode-go` API key from OpenCode's XDG data directory
+  (`$XDG_DATA_HOME/opencode/auth.json`, default `~/.local/share/opencode`)
+  and shows the official rolling 5-hour, weekly, and monthly quota bars.
+  OpenCode's credentials are provider-scoped rather than account-scoped, so
+  there's no account identity to snapshot — switching is intentionally not
+  offered and nothing is ever written back. Balance-funded accounts show a
+  **Balance** tag in place of quota bars. Thanks to @abhirampai (#2).
+
+### Fixed
+- **A Claude account's saved credentials could be overwritten with another
+  account's.** Claude Desktop bundles its own copy of Claude Code, which
+  writes the same `Claude Code-credentials` keychain item and `~/.claude.json`
+  as the CLI — so the live credential can change owner while `~/.claude.json`
+  still names the previous account. PitStop took that pairing on trust: it
+  would report the new account's usage on the old account's row and, on the
+  next token rotation, write those foreign tokens over the old account's saved
+  snapshot, which the identity audit then deleted as poisoned. The live item's
+  owner is now confirmed before it's used for an account, and the saved
+  snapshot is used when it isn't a match. The check is cached against the
+  live blob's bytes, so the steady state costs nothing.
+- **The error that blocks a switch after a takeover said nothing useful.**
+  While the live login belongs to another account, saving and switching
+  both refuse — they snapshot the outgoing account first. The alert read
+  "Skipped saving <you>", naming neither the account that now owns the
+  login nor a way out of the state, and the switch alert didn't say which
+  account it had failed to switch to. Both now do, and the message points
+  at `claude` + `/login`.
+- **OpenCode reset times went missing.** Resets landing on a whole second
+  (Go omits the fractional part when it's zero) failed to parse, blanking
+  the reset column and letting the time-to-limit projection point past a
+  window that had already reset. Nanosecond-precision stamps failed too.
+- **OpenCode ignored rate limits.** A 429 fell through to the generic error
+  path, which sets no backoff — PitStop re-hit the limited endpoint every
+  refresh instead of honoring `Retry-After` like the other providers.
+- **A re-login after an OpenCode auth failure went unnoticed** for up to an
+  hour, leaving a stale "reconnect" row up after the user had already
+  reconnected.
+- **Balance-funded OpenCode accounts showed a permanent error.** Reporting
+  no quota windows was treated as a malformed response, which also made the
+  **Balance** tag unreachable.
+- **A nonsense reset timestamp could crash the menu** on render, for any
+  provider — the relative-time formatter trapped converting an out-of-range
+  interval to `Int`.
+- **One unreadable cache entry blanked every provider's bars.** A usage
+  cache written by a different build could fail to decode as a whole,
+  discarding the saved usage, backoff, and needs-action state for Claude,
+  Codex, and Gemini along with it.
+- **`--check` printed nothing for an installed-but-not-signed-in OpenCode**,
+  the exact case worth diagnosing.
+- **`--screenshot` masked the OpenCode row into a fake email address** and
+  shifted every real account's mask, changing doc captures.
+
 ## [0.5.0] - 2026-07-16
 ### Added
 - **Choose which limits trigger auto-switch.** Settings gains trigger
@@ -171,7 +226,10 @@ First versioned release.
 ### Fixed
 - Fall back to Desktop usage when a merged account's Claude Code fetch fails.
 
-[Unreleased]: https://github.com/Livin21/pitstop/compare/v0.4.1...HEAD
+[Unreleased]: https://github.com/Livin21/pitstop/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/Livin21/pitstop/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/Livin21/pitstop/compare/v0.4.2...v0.5.0
+[0.4.2]: https://github.com/Livin21/pitstop/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/Livin21/pitstop/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/Livin21/pitstop/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/Livin21/pitstop/compare/v0.3.0...v0.3.1

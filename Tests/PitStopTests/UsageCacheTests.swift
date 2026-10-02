@@ -33,6 +33,8 @@ final class UsageCacheTests: XCTestCase {
                 windows: [.init(label: "5h", usedPercent: 91, resetsAt: now)], fetchedAt: now)],
             geminiUsage: ["gemini:c@x.com": Gemini.Usage(
                 windows: [.init(label: "2.5 Pro", usedPercent: 8, resetsAt: nil)], fetchedAt: now)],
+            openCodeUsage: [OpenCode.accountKey: OpenCode.Usage(
+                windows: [.init(label: "5h", usedPercent: 64, resetsAt: now)], fetchedAt: now)],
             fetchError: ["a@x.com": "Rate limited"],
             failureCount: ["a@x.com": 2],
             nextFetchAllowed: ["a@x.com": now.addingTimeInterval(240)],
@@ -59,13 +61,58 @@ final class UsageCacheTests: XCTestCase {
             windows: [], fetchedAt: now.addingTimeInterval(-25 * 3600))
         snap.geminiUsage["gemini:old@x.com"] = Gemini.Usage(
             windows: [], fetchedAt: now.addingTimeInterval(-25 * 3600))
+        snap.openCodeUsage["opencode:old"] = OpenCode.Usage(
+            windows: [], fetchedAt: now.addingTimeInterval(-25 * 3600))
         try UsageCache.save(snap, to: url)
         let loaded = try XCTUnwrap(UsageCache.load(from: url, now: now))
         XCTAssertNil(loaded.usage["old@x.com"])
         XCTAssertNil(loaded.codexUsage["codex:old@x.com"])
         XCTAssertNil(loaded.geminiUsage["gemini:old@x.com"])
+        XCTAssertNil(loaded.openCodeUsage["opencode:old"])
         XCTAssertNotNil(loaded.usage["a@x.com"])            // fresh entries survive
         XCTAssertNotNil(loaded.codexUsage["codex:b@x.com"])
+        XCTAssertNotNil(loaded.openCodeUsage[OpenCode.accountKey])
+    }
+
+    /// The one key allowed to be absent: caches written before OpenCode
+    /// support existed are otherwise perfectly good, and rejecting them would
+    /// blank every other provider's bars for a launch.
+    func testLoadsCacheWrittenBeforeOpenCodeExisted() throws {
+        let now = Date()
+        let full = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(sampleSnapshot(now: now))) as? [String: Any]
+        var legacy = try XCTUnwrap(full)
+        legacy.removeValue(forKey: "openCodeUsage")
+        try JSONSerialization.data(withJSONObject: legacy).write(to: url)
+
+        let loaded = try XCTUnwrap(UsageCache.load(from: url, now: now))
+        XCTAssertTrue(loaded.openCodeUsage.isEmpty)
+        XCTAssertNotNil(loaded.usage["a@x.com"])
+        XCTAssertEqual(loaded.fetchError["a@x.com"], "Rate limited")
+    }
+
+    /// Every other key stays required — a snapshot missing one is damaged, and
+    /// a clean start beats restoring backoff gates with nothing to explain them.
+    func testRejectsSnapshotMissingARequiredKey() throws {
+        let now = Date()
+        let full = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(sampleSnapshot(now: now))) as? [String: Any]
+        var damaged = try XCTUnwrap(full)
+        damaged.removeValue(forKey: "usage")
+        try JSONSerialization.data(withJSONObject: damaged).write(to: url)
+
+        XCTAssertNil(UsageCache.load(from: url, now: now))
+    }
+
+    /// Guards the silent-omission failure of a hand-written encoder: every
+    /// property must actually reach disk.
+    func testEncodesEveryKey() throws {
+        let encoded = try JSONSerialization.jsonObject(
+            with: JSONEncoder().encode(sampleSnapshot(now: Date()))) as? [String: Any]
+        let keys = Set(try XCTUnwrap(encoded).keys)
+        XCTAssertEqual(keys, ["usage", "codexUsage", "geminiUsage", "openCodeUsage",
+                              "fetchError", "failureCount", "nextFetchAllowed",
+                              "needsAction", "desktopAccount"])
     }
 
     func testClampsRestoredBackoffToMax() throws {

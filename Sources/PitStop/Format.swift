@@ -15,8 +15,10 @@ enum Format {
     }()
 
     static func percent(_ v: Double?) -> String {
-        guard let v else { return "–" }
-        return "\(Int(v.rounded()))%"
+        guard let v, v.isFinite else { return "–" }
+        // Same trapping hazard as wholeSeconds: utilization comes from provider
+        // payloads, so pin it to a displayable range before converting.
+        return "\(Int(min(max(v, -1_000_000), 1_000_000).rounded()))%"
     }
 
     static func reset(_ date: Date?) -> String {
@@ -27,8 +29,18 @@ enum Format {
         return "resets \(stamp) (\(relative(date.timeIntervalSinceNow)))"
     }
 
+    /// Whole seconds, clamped into a range `Int` can represent. Reset stamps
+    /// arrive straight from provider payloads, and `Int(_: Double)` traps on
+    /// anything past `Int.max` — a nonsense timestamp must not kill the app.
+    /// NaN and negatives collapse to zero, which the callers already render
+    /// as "now" / "<1m".
+    static func wholeSeconds(_ seconds: TimeInterval) -> Int {
+        guard seconds > 0 else { return 0 }
+        return seconds < Double(Int.max) ? Int(seconds) : .max
+    }
+
     static func relative(_ seconds: TimeInterval) -> String {
-        let total = Int(max(0, seconds))
+        let total = wholeSeconds(seconds)
         let d = total / 86400
         let h = (total % 86400) / 3600
         let m = (total % 3600) / 60
@@ -61,7 +73,7 @@ enum Format {
     }
 
     static func relativeShort(_ seconds: TimeInterval) -> String {
-        let total = Int(max(0, seconds))
+        let total = wholeSeconds(seconds)
         let d = total / 86400
         let h = (total % 86400) / 3600
         let m = (total % 3600) / 60
